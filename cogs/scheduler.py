@@ -64,7 +64,10 @@ class CharacterUpdateScheduler(commands.Cog):
             # 멤버 설정 로드
             with open(self.members_config_path, 'r', encoding='utf-8') as f:
                 config_data = yaml.safe_load(f)
-                members = config_data.get('members', [])
+                all_members = config_data.get('members', [])
+                
+                # active 상태인 멤버만 필터링
+                members = [member for member in all_members if member.get('active', False)]
             
             # 이전 데이터 로드
             with open(self.character_data_path, 'r', encoding='utf-8') as f:
@@ -79,7 +82,7 @@ class CharacterUpdateScheduler(commands.Cog):
             if not levelup_channel:
                 print(f"레벨업 축하 채널을 찾을 수 없습니다: {self.levelup_channel_id}")
             
-            # 각 멤버별로 처리
+            # 각 멤버별로 처리 (active 멤버만)
             for member in members:
                 member_id = member.get('id')
                 discord_name = member.get('discord_name')

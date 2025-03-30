@@ -17,9 +17,12 @@ print(f"API 키 로드: {'성공' if api_key else '실패'}")
 # 멤버 설정 로드
 with open('configs/members_config.yaml', 'r', encoding='utf-8') as f:
     config_data = yaml.safe_load(f)
-    members = config_data.get('members', [])
+    all_members = config_data.get('members', [])
+    
+    # active 상태인 멤버만 필터링
+    members = [member for member in all_members if member.get('active', False)]
 
-print(f"멤버 설정 로드 완료: {len(members)}명의 멤버 정보 확인")
+print(f"멤버 설정 로드 완료: 전체 {len(all_members)}명 중 활성화된 {len(members)}명의 멤버 정보 확인")
 
 # API 호출에 필요한 헤더 설정
 headers = {

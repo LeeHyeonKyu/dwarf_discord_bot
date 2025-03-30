@@ -53,9 +53,12 @@ def fetch_character_siblings(character_name):
 # 멤버 설정 파일 로드
 with open('configs/members_config.yaml', 'r', encoding='utf-8') as f:
     config_data = yaml.safe_load(f)
-    members = config_data.get('members', [])
+    all_members = config_data.get('members', [])
+    
+    # active 상태인 멤버만 필터링
+    members = [member for member in all_members if member.get('active', False)]
 
-print(f"총 {len(members)}명의 멤버 정보를 로드했습니다.")
+print(f"총 {len(all_members)}명 중 활성화된 {len(members)}명의 멤버 정보를 로드했습니다.")
 
 # 결과를 저장할 데이터 구조
 character_data = {}

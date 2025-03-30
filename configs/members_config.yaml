@@ -1,49 +1,130 @@
 members:
-- id: '이니무'
+- id: 이니무
   discord_name: INIMU
   discord_id: '269763716751425536'
-  main_characters: ['INIMU', '이니무']
-- id: '머지'
+  main_characters:
+  - INIMU
+  - 이니무
+  active: true
+- id: 머지
   discord_name: 머지령
   discord_id: '299849452863225858'
-  main_characters: ['하아린잉', '금광동리어카단속반머지령']
-- id: '흑흑'
+  main_characters:
+  - 하아린잉
+  - 금광동리어카단속반머지령
+  active: true
+- id: 흑흑
   discord_name: 흑흑임미다
   discord_id: '310031184094560257'
-  main_characters: ['흑흑임미다', '양재동보완관흑흑이', '단검쓰는양재동흑흑이']
-- id: '뱁새'
+  main_characters:
+  - 흑흑임미다
+  - 양재동보완관흑흑이
+  - 단검쓰는양재동흑흑이
+  active: true
+- id: 뱁새
   discord_name: 범이 하늘에 섰다
   discord_id: '310466533325275136'
-  main_characters: ['스누피']
-- id: '카롱'
+  main_characters:
+  - 스누피
+  active: true
+- id: 카롱
   discord_name: 카롱
   discord_id: '318699735018110976'
-  main_characters: ['쵸코카롱']
-- id: '라카'
+  main_characters:
+  - 쵸코카롱
+  active: true
+- id: 라카
   discord_name: 라카
   discord_id: '321967979531337757'
-  main_characters: ['라카리안', '캐드아인']
-- id: '민우'
+  main_characters:
+  - 라카리안
+  - 캐드아인
+  active: true
+- id: 민우
   discord_name: 깜몬GYG
   discord_id: '363675157518221313'
-  main_characters: ['최민우']
-- id: '가냥펀'
+  main_characters:
+  - 최민우
+  active: true
+- id: 가냥펀
   discord_name: 가냥펀
   discord_id: '392257818519928833'
-  main_characters: ['가락동냥펀치']
-- id: '온륑'
+  main_characters:
+  - 가락동냥펀치
+  active: true
+- id: 온륑
   discord_name: 온륑
   discord_id: '592017392733782057'
-  main_characters: ['온륑']
-- id: '땅콩'
+  main_characters:
+  - 온륑
+  active: true
+- id: 땅콩
   discord_name: KDH
   discord_id: '708169923603464253'
-  main_characters: ['보스땅콩털이범']
-- id: '하프'
+  main_characters:
+  - 보스땅콩털이범
+  active: true
+- id: 하프
   discord_name: 똥배나온하프
   discord_id: '1081129084408578109'
-  main_characters: ['똥배나온하프', '똥배나온쿼카']
-- id: '드워프'
+  main_characters:
+  - 똥배나온하프
+  - 똥배나온쿼카
+  active: true
+- id: 드워프
   discord_name: 놀러나온드워프
   discord_id: '1160931220692156481'
-  main_characters: ['놀러나온드워프', '개발하는드워프']
+  main_characters:
+  - 놀러나온드워프
+  - 개발하는드워프
+  active: true
+- id: jilsoggang
+  discord_name: 질소깡
+  discord_id: '270112617798828033'
+  main_characters: []
+  active: false
+- id: loro1575
+  discord_name: 로로
+  discord_id: '302697316341776384'
+  main_characters: []
+  active: false
+- id: qwerewq321
+  discord_name: 자허기
+  discord_id: '322374805150236672'
+  main_characters: []
+  active: false
+- id: denbburanongjang
+  discord_name: 검둥흰둥
+  discord_id: '391446642408292353'
+  main_characters: []
+  active: false
+- id: seungwon_1
+  discord_name: seungwon_1
+  discord_id: '395519890695651329'
+  main_characters: []
+  active: false
+- id: nojae1376
+  discord_name: 노재
+  discord_id: '405391848807596032'
+  main_characters: []
+  active: false
+- id: tarie4316
+  discord_name: IIICE
+  discord_id: '608970566292209664'
+  main_characters: []
+  active: false
+- id: darklake.
+  discord_name: 똥배나온쿼카
+  discord_id: '1081194934071214100'
+  main_characters: []
+  active: false
+- id: hkl01
+  discord_name: 드워프분신
+  discord_id: '1236197233683337226'
+  main_characters: []
+  active: false
+- id: yomyom06400_81838
+  discord_name: 욤욤
+  discord_id: '1260543184467923019'
+  main_characters: []
+  active: false

@@ -23,6 +23,10 @@ class ScheduleCommands(commands.Cog):
             
             with open('configs/members_config.yaml', 'r', encoding='utf-8') as member_file:
                 member_data = yaml.safe_load(member_file)
+                
+                # active 상태인 멤버만 필터링
+                active_members = [member for member in member_data.get('members', []) if member.get('active', False)]
+                member_data['members'] = active_members
             
             channel = self.bot.get_channel(self.CHANNEL_ID)
             if not channel:
@@ -34,7 +38,7 @@ class ScheduleCommands(commands.Cog):
                 await ctx.send(f'대상 채널이 텍스트 채널이 아닙니다: {self.CHANNEL_ID}')
                 return
             
-            # 멘션 정보 구성
+            # 멘션 정보 구성 (active 멤버만)
             members = {member['id']: member['discord_name'] for member in member_data['members']}
             
             # 레이드 정보 필터링
