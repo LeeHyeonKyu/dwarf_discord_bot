@@ -114,8 +114,18 @@ async def create_raid_threads(client, channel_id, active_only=True, is_test=Fals
             print("레이드 구성 정보가 없습니다.")
             return False
         
-        # 최소 레벨 기준으로 정렬 (낮은 순서부터)
-        raids.sort(key=lambda x: x.get('min_level', 0))
+        # 정렬 기준 변경
+        # 1. min_level 기준 오름차순
+        # 2. min_level이 같으면 max_level이 있는 레이드 우선
+        # 3. max_level이 있는 경우 max_level 기준 오름차순
+        def raid_sort_key(raid):
+            min_level = raid.get('min_level', 0)
+            max_level = raid.get('max_level')
+            # max_level이 있으면 해당 값 사용, 없으면 float('inf')(무한대) 사용
+            max_level_value = max_level if max_level is not None else float('inf')
+            return (min_level, max_level_value)
+        
+        raids.sort(key=raid_sort_key)
         
         # 멤버 캐릭터 정보 로드
         member_characters = await load_member_characters(active_only=active_only)
