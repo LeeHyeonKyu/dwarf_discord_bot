@@ -92,7 +92,7 @@ class CharacterUpdateScheduler(commands.Cog):
                 # 주 캐릭터로 API 요청
                 main_character = main_characters[0] if main_characters else ""
                 member_changes = []
-                significant_levelups = []  # 유의미한 레벨업 정보 (5 레벨 이상)
+                level_changes = []  # 모든 레벨업 정보
                 
                 try:
                     # API 호출로 캐릭터 데이터 가져오기
@@ -152,11 +152,8 @@ class CharacterUpdateScheduler(commands.Cog):
                                                 'difference': level_increase
                                             }
                                             member_changes.append(change)
+                                            level_changes.append(change)
                                             changes_detected = True
-                                            
-                                            # 유의미한 레벨업 (5 레벨 이상 상승)
-                                            if level_increase >= 5:
-                                                significant_levelups.append(change)
                         
                         # 새 데이터 저장
                         new_data[member_id] = {
@@ -184,12 +181,12 @@ class CharacterUpdateScheduler(commands.Cog):
                             
                             await channel.send(embed=embed)
                             
-                            # 레벨업 축하 메시지 전송 (5 레벨 이상 상승)
-                            if significant_levelups and levelup_channel and discord_id:
-                                for change in significant_levelups:
+                            # 레벨업 축하 메시지 전송 (모든 레벨업)
+                            if level_changes and levelup_channel and discord_id:
+                                for change in level_changes:
                                     level_embed = discord.Embed(
                                         title=f"🎉 레벨업 축하합니다! 🎉",
-                                        description=f"<@{discord_id}>님의 캐릭터가 크게 성장했습니다!",
+                                        description=f"<@{discord_id}>님의 {change['character']} ({change['class']}) 캐릭터가 {change['old_level']}에서 {change['new_level']}로 성장했습니다! (+{change['difference']:.2f})",
                                         color=discord.Color.gold(),
                                         timestamp=datetime.datetime.now()
                                     )
@@ -275,7 +272,7 @@ class CharacterUpdateScheduler(commands.Cog):
         await ctx.send("멤버 정보 업데이트가 완료되었습니다.")
     
     @commands.command(name='show_character')
-    async def show_character(self, ctx, member_id: str = None):
+    async def show_character(self, ctx, member_id: Optional[str] = None):
         """
         멤버의 캐릭터 정보 조회
         사용법: !show_character [멤버ID]

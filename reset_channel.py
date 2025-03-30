@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # .env.secret 파일 로드
 load_dotenv('.env.secret')
 TOKEN = os.getenv('DISCORD_TOKEN')
-TEST_CHANNEL_ID = int(os.getenv('TEST_CHANNEL_ID', '0'))
+SCHEDULE_CHANNEL_ID = int(os.getenv('SCHEDULE_CHANNEL_ID', '0'))
 
 # 인텐트 설정
 intents = discord.Intents.default()
@@ -20,16 +20,16 @@ async def on_ready():
     print(f'{client.user}로 로그인했습니다!')
     
     try:
-        # 테스트 채널 가져오기
-        channel = client.get_channel(TEST_CHANNEL_ID)
+        # 스케줄 채널 가져오기
+        channel = client.get_channel(SCHEDULE_CHANNEL_ID)
         if not channel:
-            print(f"채널 ID {TEST_CHANNEL_ID}를 찾을 수 없습니다.")
+            print(f"채널 ID {SCHEDULE_CHANNEL_ID}를 찾을 수 없습니다.")
             await client.close()
             return
         
         # 채널 타입 확인
         if not isinstance(channel, discord.TextChannel):
-            print(f"채널 ID {TEST_CHANNEL_ID}는 텍스트 채널이 아닙니다. 텍스트 채널만 지원됩니다.")
+            print(f"채널 ID {SCHEDULE_CHANNEL_ID}는 텍스트 채널이 아닙니다. 텍스트 채널만 지원됩니다.")
             await client.close()
             return
         
@@ -93,7 +93,7 @@ async def on_ready():
 if __name__ == "__main__":
     if not TOKEN:
         print("DISCORD_TOKEN이 설정되어 있지 않습니다. .env.secret 파일을 확인해주세요.")
-    elif TEST_CHANNEL_ID == 0:
-        print("TEST_CHANNEL_ID가 .env.secret 파일에 설정되어 있지 않습니다.")
+    elif SCHEDULE_CHANNEL_ID == 0:
+        print("SCHEDULE_CHANNEL_ID가 .env.secret 파일에 설정되어 있지 않습니다.")
     else:
         asyncio.run(client.start(TOKEN)) 

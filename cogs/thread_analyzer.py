@@ -13,7 +13,7 @@ class ThreadAnalyzer(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.raids_channel_id = int(os.getenv("RAIDS_CHANNEL_ID", "0"))
+        self.schedule_channel_id = int(os.getenv("SCHEDULE_CHANNEL_ID", "0"))
         if not self.openai_api_key:
             print("경고: OPENAI_API_KEY가 설정되지 않았습니다.")
         
@@ -147,15 +147,15 @@ class ThreadAnalyzer(commands.Cog):
     @tasks.loop(minutes=30)
     async def auto_analyze_threads(self):
         """30분마다 모든 레이드 스레드를 자동으로 분석하고 업데이트"""
-        if self.raids_channel_id == 0:
-            print("레이드 채널 ID가 설정되지 않아 자동 분석을 건너뜁니다.")
+        if self.schedule_channel_id == 0:
+            print("스케줄 채널 ID가 설정되지 않아 자동 분석을 건너뜁니다.")
             return
         
         print(f"{datetime.datetime.now()} - 자동 스레드 분석 시작")
         
-        channel = self.bot.get_channel(self.raids_channel_id)
+        channel = self.bot.get_channel(self.schedule_channel_id)
         if not channel:
-            print(f"레이드 채널을 찾을 수 없습니다: {self.raids_channel_id}")
+            print(f"스케줄 채널을 찾을 수 없습니다: {self.schedule_channel_id}")
             return
         
         if not isinstance(channel, discord.TextChannel):
@@ -211,9 +211,9 @@ class ThreadAnalyzer(commands.Cog):
         """(자동) 스레드 내 메시지 분석하여 원본 레이드 메시지 업데이트"""
         try:
             # 레이드 채널 가져오기
-            channel = self.bot.get_channel(self.raids_channel_id)
+            channel = self.bot.get_channel(self.schedule_channel_id)
             if not channel:
-                print("레이드 채널을 찾을 수 없습니다.")
+                print("스케줄 채널을 찾을 수 없습니다.")
                 return
             
             # 스레드의 소유자 메시지 찾기
@@ -331,14 +331,14 @@ class ThreadAnalyzer(commands.Cog):
         """스레드 내 메시지 분석하여 원본 레이드 메시지 업데이트"""
         try:
             # 원본 메시지 가져오기
-            raids_channel_id = os.getenv("RAIDS_CHANNEL_ID")
-            if not raids_channel_id:
-                await ctx.send("레이드 채널 ID가 설정되지 않았습니다.")
+            schedule_channel_id = os.getenv("SCHEDULE_CHANNEL_ID")
+            if not schedule_channel_id:
+                await ctx.send("스케줄 채널 ID가 설정되지 않았습니다.")
                 return
             
-            channel = self.bot.get_channel(int(raids_channel_id))
+            channel = self.bot.get_channel(int(schedule_channel_id))
             if not channel:
-                await ctx.send("레이드 채널을 찾을 수 없습니다.")
+                await ctx.send("스케줄 채널을 찾을 수 없습니다.")
                 return
             
             # 스레드의 소유자 메시지 찾기
