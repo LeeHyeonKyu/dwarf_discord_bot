@@ -2,11 +2,22 @@ import json
 import asyncio
 import aiohttp
 import os
+import sys
+import pathlib
+import hashlib
 from dotenv import load_dotenv
+
+# 상위 디렉토리 경로를 추가하여 프로젝트 모듈을 import할 수 있게 함
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # .env.secret 파일 로드
 load_dotenv('.env.secret')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+# 캐시 디렉토리 설정
+CACHE_DIR = pathlib.Path('/tmp/discord_bot_llm_cache')
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+print(f"LLM 캐시 디렉토리: {CACHE_DIR}")
 
 # 테스트용 가상 스레드 메시지 생성
 test_messages = [
@@ -97,10 +108,54 @@ original_message = """# 하기르 (카제로스 1막 하드)
 - note: 
 """
 
+def get_cache_key(thread_messages, message_content, raid_name):
+    """입력 데이터의 해시값(캐시 키)을 생성합니다"""
+    # 입력 데이터를 문자열로 직렬화
+    data_str = json.dumps({
+        'thread_messages': thread_messages,
+        'message_content': message_content,
+        'raid_name': raid_name
+    }, sort_keys=True, ensure_ascii=False)
+    
+    # SHA-256 해시 생성
+    hash_obj = hashlib.sha256(data_str.encode('utf-8'))
+    return hash_obj.hexdigest()
+
+def get_cached_result(cache_key):
+    """캐시에서 결과를 가져옵니다"""
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+            print(f"캐시에서 결과를 로드했습니다: {cache_key}")
+            return cached_data
+        except Exception as e:
+            print(f"캐시 로드 중 오류 발생: {e}")
+    return None
+
+def save_to_cache(cache_key, result):
+    """결과를 캐시에 저장합니다"""
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"결과를 캐시에 저장했습니다: {cache_key}")
+    except Exception as e:
+        print(f"캐시 저장 중 오류 발생: {e}")
+
 async def analyze_messages_with_openai(thread_messages, message_content, raid_name):
-    """OpenAI API를 사용하여 메시지 분석하고 업데이트된 메시지 반환"""
+    """OpenAI API를 사용하여 메시지 분석하고 업데이트된 메시지 반환 (캐싱 적용)"""
     if not OPENAI_API_KEY:
         return {"error": "OpenAI API 키가 설정되지 않았습니다. .env.secret 파일을 확인해주세요."}
+    
+    # 캐시 키 생성
+    cache_key = get_cache_key(thread_messages, message_content, raid_name)
+    
+    # 캐시 확인
+    cached_result = get_cached_result(cache_key)
+    if cached_result:
+        return cached_result
     
     # 메시지 포맷팅
     formatted_messages = []
@@ -148,6 +203,7 @@ async def analyze_messages_with_openai(thread_messages, message_content, raid_na
 """
 
     try:
+        print(f"OpenAI API 호출 중... (캐시 키: {cache_key[:8]}...)")
         # OpenAI API 호출
         headers = {
             "Content-Type": "application/json",
@@ -160,7 +216,7 @@ async def analyze_messages_with_openai(thread_messages, message_content, raid_na
                 {"role": "system", "content": "당신은 디스코드 대화에서 정보를 추출하여 메시지를 업데이트하는 도우미입니다."},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.3
+            "temperature": 0.0
         }
         
         async with aiohttp.ClientSession() as session:
@@ -180,12 +236,19 @@ async def analyze_messages_with_openai(thread_messages, message_content, raid_na
                         if content.startswith("markdown\n") or content.startswith("md\n"):
                             content = "\n".join(content.split("\n")[1:])
                     
-                    return {"content": content}
+                    result = {"content": content}
+                    
+                    # 결과를 캐시에 저장
+                    save_to_cache(cache_key, result)
+                    
+                    return result
                 else:
-                    return {"error": f"OpenAI API 오류: 상태 코드 {response.status}"}
+                    error_result = {"error": f"OpenAI API 오류: 상태 코드 {response.status}"}
+                    return error_result
     
     except Exception as e:
-        return {"error": f"OpenAI API 오류: {str(e)}"}
+        error_result = {"error": f"OpenAI API 오류: {str(e)}"}
+        return error_result
 
 async def main():
     """테스트 실행"""

@@ -1,4 +1,9 @@
 import json
+import sys
+import os
+
+# 상위 디렉토리 경로를 추가하여 프로젝트 모듈을 import할 수 있게 함
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 테스트용 가상 스레드 메시지 생성
 test_messages = [
@@ -251,13 +256,19 @@ def update_raid_message_simulation(original_content, analysis_result, messages):
     
     return new_content
 
-# 메시지 업데이트 시뮬레이션 실행
-updated_message = update_raid_message_simulation(original_message, analysis_result, test_messages)
+def main():
+    """테스트 실행"""
+    print("레이드 메시지 업데이트 시뮬레이션 시작...")
 
-# 결과 출력
-print("원본 메시지:")
-print("------------")
-print(original_message)
-print("\n업데이트된 메시지:")
-print("------------------")
-print(updated_message) 
+    # 시뮬레이션 실행
+    updated_message = update_raid_message_simulation(original_message, analysis_result, test_messages)
+    
+    print("\n원본 메시지:")
+    print("------------")
+    print(original_message)
+    print("\n업데이트된 메시지:")
+    print("------------------")
+    print(updated_message)
+
+if __name__ == "__main__":
+    main() 

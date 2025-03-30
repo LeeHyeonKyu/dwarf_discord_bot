@@ -171,7 +171,7 @@ class ThreadAnalyzer(commands.Cog):
                     {"role": "system", "content": "당신은 디스코드 대화에서 정보를 추출하여 메시지를 업데이트하는 도우미입니다."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.3
+                "temperature": 0.0
             }
             
             print(f"OpenAI API 호출 중... (캐시 키: {cache_key[:8]}...)")
