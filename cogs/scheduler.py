@@ -200,18 +200,6 @@ class CharacterUpdateScheduler(commands.Cog):
                                         inline=False
                                     )
                                     
-                                    gif_urls = [
-                                        "https://media.giphy.com/media/l4JySAWfMaY7w88sU/giphy.gif",
-                                        "https://media.giphy.com/media/3oz8xAFtqoOUUrsh7W/giphy.gif",
-                                        "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
-                                        "https://media.giphy.com/media/YTbZzCkRQCEJa/giphy.gif",
-                                        "https://media.giphy.com/media/xT0xezQGU5xCDJuCPe/giphy.gif"
-                                    ]
-                                    
-                                    # 랜덤 GIF 선택
-                                    random_gif = gif_urls[hash(change['character']) % len(gif_urls)]
-                                    level_embed.set_image(url=random_gif)
-                                    
                                     await levelup_channel.send(embed=level_embed)
                 
                 except Exception as e:
