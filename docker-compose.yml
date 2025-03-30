@@ -8,5 +8,10 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env.secret:/app/.env.secret
+      - llm_cache:/tmp/discord_bot_llm_cache
     environment:
-      - TZ=Asia/Seoul 
+      - TZ=Asia/Seoul
+
+volumes:
+  llm_cache:
+    driver: local 

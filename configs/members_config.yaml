@@ -6,11 +6,11 @@ members:
 - id: '머지'
   discord_name: 머지령
   discord_id: '299849452863225858'
-  main_characters: ['하아린잉']
+  main_characters: ['하아린잉', '금광동리어카단속반머지령']
 - id: '흑흑'
   discord_name: 흑흑임미다
   discord_id: '310031184094560257'
-  main_characters: ['흑흑임미다']
+  main_characters: ['흑흑임미다', '양재동보완관흑흑이', '단검쓰는양재동흑흑이']
 - id: '뱁새'
   discord_name: 범이 하늘에 섰다
   discord_id: '310466533325275136'
@@ -22,7 +22,7 @@ members:
 - id: '라카'
   discord_name: 라카
   discord_id: '321967979531337757'
-  main_characters: ['라카리안']
+  main_characters: ['라카리안', '캐드아인']
 - id: '민우'
   discord_name: 깜몬GYG
   discord_id: '363675157518221313'
