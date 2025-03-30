@@ -218,50 +218,80 @@ async def create_raid_threads(client, channel_id, active_only=True, is_test=Fals
                     members_data.sort(key=lambda x: (x['support_count'] > 0, x['total_count']), reverse=True)
                     
                     # 스레드에 멤버 정보 메시지 전송
-                    thread_message = f"# {raid_name} 참가 가능 멤버"
-                    if active_only:
-                        thread_message += " (활성 멤버만)"
-                    thread_message += "\n\n"
+                    # 메시지 분할을 위한 설정
+                    MAX_MESSAGE_LENGTH = 1900  # 여유 있게 2000보다 작게 설정
                     
-                    # 모든 멤버 정보를 하나의 목록으로 표시
+                    # 헤더 메시지 전송
+                    header_message = f"# {raid_name} 참가 가능 멤버"
+                    if active_only:
+                        header_message += " (활성 멤버만)"
+                    header_message += "\n\n"
+                    
+                    await thread.send(header_message)
+                    
+                    # 멤버 정보를 개별 메시지로 분할
                     for member in members_data:
+                        member_message = ""
                         support_count = member['support_count']
                         dealer_count = member['dealer_count']
                         
                         # 멤버 기본 정보 (아이디, 디스코드 이름, 캐릭터 수)
-                        thread_message += f"### {member['member_id']} (<@{member['discord_id']}>)\n"
-                        thread_message += f"- 총 {member['total_count']}개 캐릭터 (서포터: {support_count}개, 딜러: {dealer_count}개)\n\n"
+                        member_message += f"### {member['member_id']} (<@{member['discord_id']}>)\n"
+                        member_message += f"- 총 {member['total_count']}개 캐릭터 (서포터: {support_count}개, 딜러: {dealer_count}개)\n\n"
                         
                         # 서포터 캐릭터 목록
                         if support_count > 0:
-                            thread_message += "**서포터**:\n"
+                            member_message += "**서포터**:\n"
                             # 아이템 레벨 기준으로 정렬
                             sorted_supports = sorted(member['support_chars'], key=lambda x: float(x['level'].replace(',', '')), reverse=True)
                             for char in sorted_supports:
-                                thread_message += f"- 🔹 **{char['name']}** ({char['class']}, {char['level']})\n"
-                            thread_message += "\n"
+                                member_message += f"- 🔹 **{char['name']}** ({char['class']}, {char['level']})\n"
+                            member_message += "\n"
                         
                         # 딜러 캐릭터 목록
                         if dealer_count > 0:
-                            thread_message += "**딜러**:\n"
+                            member_message += "**딜러**:\n"
                             # 아이템 레벨 기준으로 정렬
                             sorted_dealers = sorted(member['dealer_chars'], key=lambda x: float(x['level'].replace(',', '')), reverse=True)
                             for char in sorted_dealers:
-                                thread_message += f"- 🔸 **{char['name']}** ({char['class']}, {char['level']})\n"
+                                member_message += f"- 🔸 **{char['name']}** ({char['class']}, {char['level']})\n"
                         
-                        thread_message += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        member_message += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        
+                        # 멤버 메시지가 너무 길면 분할
+                        if len(member_message) > MAX_MESSAGE_LENGTH:
+                            parts = []
+                            current_part = ""
+                            lines = member_message.split('\n')
+                            
+                            for line in lines:
+                                if len(current_part) + len(line) + 1 > MAX_MESSAGE_LENGTH:
+                                    parts.append(current_part)
+                                    current_part = line + '\n'
+                                else:
+                                    current_part += line + '\n'
+                            
+                            if current_part:
+                                parts.append(current_part)
+                            
+                            for part in parts:
+                                await thread.send(part)
+                        else:
+                            await thread.send(member_message)
                     
-                    # 총합 정보
+                    # 통계 정보는 별도 메시지로 전송
+                    stats_message = "## 통계 정보\n"
                     total_support_chars = sum(member['support_count'] for member in members_data)
                     total_dealer_chars = sum(member['dealer_count'] for member in members_data)
                     total_chars = total_support_chars + total_dealer_chars
                     
-                    thread_message += f"## 통계 정보\n"
-                    thread_message += f"- 총 참가 가능 멤버: **{len(members_data)}명**\n"
-                    thread_message += f"- 총 캐릭터: **{total_chars}개** (서포터: **{total_support_chars}개**, 딜러: **{total_dealer_chars}개**)\n"
-                    thread_message += f"- 서포터 비율: **{total_support_chars / total_chars * 100:.1f}%**\n"
+                    stats_message += f"- 총 참가 가능 멤버: **{len(members_data)}명**\n"
+                    stats_message += f"- 총 캐릭터: **{total_chars}개** (서포터: **{total_support_chars}개**, 딜러: **{total_dealer_chars}개**)\n"
                     
-                    await thread.send(thread_message)
+                    if total_chars > 0:
+                        stats_message += f"- 서포터 비율: **{total_support_chars / total_chars * 100:.1f}%**\n"
+                    
+                    await thread.send(stats_message)
                 else:
                     member_status = "활성화된 " if active_only else ""
                     await thread.send(f"현재 {raid_name} 레이드에 참가 가능한 {member_status}멤버가 없습니다.")
