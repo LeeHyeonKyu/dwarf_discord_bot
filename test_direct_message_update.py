@@ -155,7 +155,7 @@ async def analyze_messages_with_openai(thread_messages, message_content, raid_na
         }
         
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-4o-mini",
             "messages": [
                 {"role": "system", "content": "당신은 디스코드 대화에서 정보를 추출하여 메시지를 업데이트하는 도우미입니다."},
                 {"role": "user", "content": prompt}
