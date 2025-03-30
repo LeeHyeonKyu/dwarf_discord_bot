@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+  discord-bot:
+    build: .
+    container_name: dwarf-discord-bot
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./.env.secret:/app/.env.secret
+    environment:
+      - TZ=Asia/Seoul 

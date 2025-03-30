@@ -1,0 +1,12 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env.example
+venv/
+.vscode/
+*.log
+data/character_data.json 
