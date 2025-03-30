@@ -1,0 +1,49 @@
+members:
+- id: '이니무'
+  discord_name: INIMU
+  discord_id: '269763716751425536'
+  main_characters: ['INIMU', '이니무']
+- id: '머지'
+  discord_name: 머지령
+  discord_id: '299849452863225858'
+  main_characters: ['하아린잉']
+- id: '흑흑'
+  discord_name: 흑흑임미다
+  discord_id: '310031184094560257'
+  main_characters: ['흑흑임미다']
+- id: '뱁새'
+  discord_name: 범이 하늘에 섰다
+  discord_id: '310466533325275136'
+  main_characters: ['스누피']
+- id: '카롱'
+  discord_name: 카롱
+  discord_id: '318699735018110976'
+  main_characters: ['쵸코카롱']
+- id: '라카'
+  discord_name: 라카
+  discord_id: '321967979531337757'
+  main_characters: ['라카리안']
+- id: '민우'
+  discord_name: 깜몬GYG
+  discord_id: '363675157518221313'
+  main_characters: ['최민우']
+- id: '가냥펀'
+  discord_name: 가냥펀
+  discord_id: '392257818519928833'
+  main_characters: ['가락동냥펀치']
+- id: '온륑'
+  discord_name: 온륑
+  discord_id: '592017392733782057'
+  main_characters: ['온륑']
+- id: '땅콩'
+  discord_name: KDH
+  discord_id: '708169923603464253'
+  main_characters: ['보스땅콩털이범']
+- id: '하프'
+  discord_name: 똥배나온하프
+  discord_id: '1081129084408578109'
+  main_characters: ['똥배나온하프', '똥배나온쿼카']
+- id: '드워프'
+  discord_name: 놀러나온드워프
+  discord_id: '1160931220692156481'
+  main_characters: ['놀러나온드워프', '개발하는드워프']

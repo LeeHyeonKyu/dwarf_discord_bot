@@ -1,0 +1,51 @@
+# raids_config.yaml - 레이드 구성 정보
+
+raids:
+  - name: "노기르"
+    members: 8
+    min_level: 1660
+    max_level: 1680
+    description: "카제로스 1막 노말"
+  
+  - name: "하기르"
+    members: 8
+    min_level: 1680
+    max_level: null
+    description: "카제로스 1막 하드"
+  
+  - name: "노브렐"
+    members: 8
+    min_level: 1670
+    max_level: 1690
+    description: "카제로스 2막 노말"
+    
+  - name: "하브렐"
+    members: 8
+    min_level: 1690
+    max_level: null
+    description: "카제로스 2막 하드"
+    
+  - name: "노르둠"
+    members: 8
+    min_level: 1700
+    max_level: 1720
+    description: "카제로스 3막 노말"
+    
+  - name: "하르둠"
+    members: 8
+    min_level: 1720
+    max_level: null
+    description: "카제로스 3막 하드"
+    
+  - name: "노르칼"
+    members: 8
+    min_level: 1680
+    max_level: 1720
+    description: "강습 8인 노말"
+    
+  - name: "하르칼"
+    members: 8
+    min_level: 1720
+    max_level: null
+    description: "강습 8인 하드"
+    

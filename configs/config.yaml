@@ -1,0 +1,10 @@
+# 디스코드 봇 설정
+# 인증 정보는 .env.secret 파일에서 로드됩니다.
+
+# 업데이트 설정
+CHECK_INTERVAL_MINUTES: 30
+UPDATES_CHANNEL_ID: "your_updates_channel_id_here"
+
+# 기타 설정
+TIMEZONE: "Asia/Seoul"
+LOCALE: "ko_KR" 
