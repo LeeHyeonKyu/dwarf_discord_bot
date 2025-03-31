@@ -22,7 +22,8 @@ def load_config():
         "LOSTARK_API_KEY": os.environ.get("LOSTARK_API_KEY", ""),
         "CHECK_INTERVAL_MINUTES": 30,
         "TIMEZONE": "Asia/Seoul",
-        "LOCALE": "ko_KR"
+        "LOCALE": "ko_KR",
+        "AUTHORIZED_USERS": []  # 명령어 사용이 허가된 사용자 ID 목록
     }
     
     # .env.secret 파일에서 민감한 정보 로드
@@ -34,6 +35,11 @@ def load_config():
         config["UPDATES_CHANNEL_ID"] = os.environ.get("UPDATES_CHANNEL_ID", "")
         config["SCHEDULE_CHANNEL_ID"] = os.environ.get("SCHEDULE_CHANNEL_ID", "")
         config["LOSTARK_API_KEY"] = os.environ.get("LOSTARK_API_KEY", "")
+        
+        # 명령어 사용이 허가된 사용자 ID 목록
+        authorized_users = os.environ.get("AUTHORIZED_USERS", "")
+        if authorized_users:
+            config["AUTHORIZED_USERS"] = [user_id.strip() for user_id in authorized_users.split(',')]
     
     # configs/config.yaml 파일에서 기타 설정 로드
     if os.path.exists(config_path):
@@ -62,10 +68,25 @@ class DwarfBot(commands.Bot):
             intents=intents,
             help_command=None
         )
+    
+    # 명령어 권한 검사 함수
+    async def is_authorized(self, ctx):
+        """명령어 사용 권한 검사 - 특정 사용자만 명령어 사용 가능"""
+        authorized_users = self.config.get("AUTHORIZED_USERS", [])
+        
+        # 권한 목록이 비어있으면 모든 사용자 허용 (설정 전이므로)
+        if not authorized_users:
+            return True
+            
+        # 사용자 ID가 허용 목록에 있는지 확인
+        return str(ctx.author.id) in authorized_users
         
     async def setup_hook(self):
         # cogs 디렉토리 생성
         os.makedirs('cogs', exist_ok=True)
+        
+        # 명령어 권한 체크 추가
+        self.add_check(self.is_authorized)
         
         # cogs 확장 로드
         for extension in ['cogs.message_handler', 'cogs.lostark', 'cogs.character_updater', 'cogs.raid', 'cogs.event_handler', 'cogs.scheduler', 'cogs.channel_manager', 'cogs.thread_analyzer', 'cogs.raid_commands', 'cogs.schedule']:
@@ -83,6 +104,15 @@ class DwarfBot(commands.Bot):
         
         # 상태 메시지 설정
         await self.change_presence(activity=discord.Game(name="!help 명령어로 도움말 확인"))
+    
+    async def on_command_error(self, ctx, error):
+        """명령어 처리 중 오류 발생 시 처리"""
+        if isinstance(error, commands.errors.CheckFailure):
+            # 권한 체크 실패 시 메시지 전송
+            await ctx.send("이 명령어를 사용할 권한이 없습니다.")
+        else:
+            # 다른 오류는 콘솔에 출력
+            print(f"명령어 처리 중 오류 발생: {error}")
 
 # 봇 실행
 async def main():
