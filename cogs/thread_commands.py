@@ -9,11 +9,23 @@ import aiohttp
 import hashlib
 import pathlib
 import logging
+import sys
 from typing import List, Dict, Any, Optional
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# 로깅 설정 변경: 표준 출력(stdout)으로 로그를 보내도록 설정
 logger = logging.getLogger('thread_commands')
+logger.setLevel(logging.INFO)
+
+# 표준 출력으로 로그 보내기
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+
+# root 로거 설정도 업데이트
+root_logger = logging.getLogger()
+if not root_logger.handlers:
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
 
 class ThreadCommands(commands.Cog):
     """스레드 내 일정 관리 명령어"""
@@ -241,10 +253,12 @@ class ThreadCommands(commands.Cog):
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
-                print(f"캐시에서 결과를 로드했습니다: {cache_key}")
+                # print() 대신 logger 사용
+                logger.info(f"캐시에서 결과를 로드했습니다: {cache_key}")
                 return cached_data
             except Exception as e:
-                print(f"캐시 로드 중 오류 발생: {e}")
+                # print() 대신 logger 사용
+                logger.error(f"캐시 로드 중 오류 발생: {e}")
         return None
     
     def save_to_cache(self, cache_key, result):
@@ -253,9 +267,11 @@ class ThreadCommands(commands.Cog):
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
-            print(f"결과를 캐시에 저장했습니다: {cache_key}")
+            # print() 대신 logger 사용
+            logger.info(f"결과를 캐시에 저장했습니다: {cache_key}")
         except Exception as e:
-            print(f"캐시 저장 중 오류 발생: {e}")
+            # print() 대신 logger 사용
+            logger.error(f"캐시 저장 중 오류 발생: {e}")
     
     async def analyze_schedule_with_llm(self, thread_messages, message_content, command_type, user_name, user_id, command_params, user_mention):
         """OpenAI API를 사용하여 일정 정보 분석"""

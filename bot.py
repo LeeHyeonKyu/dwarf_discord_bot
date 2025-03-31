@@ -3,9 +3,25 @@ import sys
 import discord
 from discord.ext import commands
 import asyncio
+import logging
 from typing import Dict, Any
 import yaml
 from dotenv import load_dotenv
+
+# 로깅 설정
+logger = logging.getLogger('bot')
+logger.setLevel(logging.INFO)
+
+# 표준 출력으로 로그 보내기
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+
+# root 로거 설정도 업데이트
+root_logger = logging.getLogger()
+if not root_logger.handlers:
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
 
 # 설정 파일 로드
 def load_config():
@@ -96,15 +112,15 @@ class DwarfBot(commands.Bot):
         for extension in ['cogs.message_handler', 'cogs.lostark', 'cogs.character_updater', 'cogs.raid', 'cogs.event_handler', 'cogs.scheduler', 'cogs.channel_manager', 'cogs.thread_analyzer', 'cogs.raid_commands', 'cogs.schedule', 'cogs.thread_commands']:
             try:
                 await self.load_extension(extension)
-                print(f'{extension} 확장을 로드했습니다.')
+                logger.info(f'{extension} 확장을 로드했습니다.')
             except Exception as e:
-                print(f'{extension} 확장을 로드하는 중 오류가 발생했습니다: {e}')
+                logger.error(f'{extension} 확장을 로드하는 중 오류가 발생했습니다: {e}')
         
-        print('확장 모듈 로드 완료')
+        logger.info('확장 모듈 로드 완료')
         
     async def on_ready(self):
-        print(f'{self.user}로 로그인했습니다!')
-        print('------')
+        logger.info(f'{self.user}로 로그인했습니다!')
+        logger.info('------')
         
         # 상태 메시지 설정
         await self.change_presence(activity=discord.Game(name="!help 명령어로 도움말 확인"))
@@ -115,8 +131,8 @@ class DwarfBot(commands.Bot):
             # 권한 체크 실패 시 메시지 전송
             await ctx.send("이 명령어를 사용할 권한이 없습니다.")
         else:
-            # 다른 오류는 콘솔에 출력
-            print(f"명령어 처리 중 오류 발생: {error}")
+            # 다른 오류는 로거에 출력
+            logger.error(f"명령어 처리 중 오류 발생: {error}")
 
 # 봇 실행
 async def main():
@@ -124,13 +140,17 @@ async def main():
     config = bot.config
     
     if not config.get("TOKEN"):
-        print("디스코드 토큰이 설정되지 않았습니다. configs/config.yaml 파일을 확인해주세요.")
+        logger.error("디스코드 토큰이 설정되지 않았습니다. configs/config.yaml 파일을 확인해주세요.")
         return
         
     # 봇 시작
+    logger.info("봇 시작 시도 중...")
     async with bot:
         await bot.start(config["TOKEN"])
 
 # 메인 함수 실행
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.critical(f"봇 실행 중 치명적 오류 발생: {e}", exc_info=True) 

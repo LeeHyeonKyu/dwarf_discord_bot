@@ -11,6 +11,10 @@ services:
       - llm_cache:/tmp/discord_bot_llm_cache
     environment:
       - TZ=Asia/Seoul
+      - PYTHONUNBUFFERED=1
+    # 로그를 표준 출력으로 보내 Docker 로그에서 볼 수 있도록 합니다
+    tty: true
+    stdin_open: true
 
 volumes:
   llm_cache:
