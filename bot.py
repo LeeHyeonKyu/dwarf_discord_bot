@@ -72,6 +72,10 @@ class DwarfBot(commands.Bot):
     # 명령어 권한 검사 함수
     async def is_authorized(self, ctx):
         """명령어 사용 권한 검사 - 특정 사용자만 명령어 사용 가능"""
+        # 스레드 명령어는 모든 사용자가 사용 가능
+        if ctx.command and ctx.command.name in ['추가', '제거', '수정'] and isinstance(ctx.channel, discord.Thread):
+            return True
+            
         authorized_users = self.config.get("AUTHORIZED_USERS", [])
         
         # 권한 목록이 비어있으면 모든 사용자 허용 (설정 전이므로)
@@ -89,7 +93,7 @@ class DwarfBot(commands.Bot):
         self.add_check(self.is_authorized)
         
         # cogs 확장 로드
-        for extension in ['cogs.message_handler', 'cogs.lostark', 'cogs.character_updater', 'cogs.raid', 'cogs.event_handler', 'cogs.scheduler', 'cogs.channel_manager', 'cogs.thread_analyzer', 'cogs.raid_commands', 'cogs.schedule']:
+        for extension in ['cogs.message_handler', 'cogs.lostark', 'cogs.character_updater', 'cogs.raid', 'cogs.event_handler', 'cogs.scheduler', 'cogs.channel_manager', 'cogs.thread_analyzer', 'cogs.raid_commands', 'cogs.schedule', 'cogs.thread_commands']:
             try:
                 await self.load_extension(extension)
                 print(f'{extension} 확장을 로드했습니다.')
