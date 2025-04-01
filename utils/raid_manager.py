@@ -94,14 +94,25 @@ async def load_member_characters(active_only=True, api_key=None):
                     filtered_data = {}
                     for discord_id, data in member_data.items():
                         if discord_id in active_member_info:
-                            # 기존 데이터 사용
+                            # 레벨 1600 미만 캐릭터 필터링
+                            filtered_characters = []
+                            for char in data.get('characters', []):
+                                item_level_str = char.get('ItemAvgLevel', '0')
+                                item_level = float(item_level_str.replace(',', ''))
+                                if item_level >= 1600:
+                                    filtered_characters.append(char)
+                            
+                            # 기존 데이터 사용하되 필터링된 캐릭터만 포함
                             filtered_data[discord_id] = data.copy()
+                            filtered_data[discord_id]['characters'] = filtered_characters
                             
                             # 로그 출력
                             member_id = active_member_info[discord_id]['id']
                             main_characters = active_member_info[discord_id]['main_characters']
+                            original_count = len(data.get('characters', []))
+                            filtered_count = len(filtered_characters)
                             print(f"멤버 {member_id}({discord_id})의 대표 캐릭터: {main_characters}")
-                            print(f"  - API 조회 없이 기존 데이터 사용: {len(data.get('characters', []))}개 캐릭터")
+                            print(f"  - API 조회 없이 기존 데이터 사용: 총 {original_count}개 중 레벨 1600 이상 {filtered_count}개 캐릭터")
                     
                     return filtered_data
                 
@@ -120,7 +131,18 @@ async def load_member_characters(active_only=True, api_key=None):
                         
                         # 대표 캐릭터가 없는 경우 기존 데이터 사용
                         if not main_characters:
-                            print(f"  - 대표 캐릭터가 없어 기존 데이터 사용: {len(data.get('characters', []))}개 캐릭터")
+                            # 레벨 1600 미만 캐릭터 필터링
+                            filtered_characters = []
+                            for char in data.get('characters', []):
+                                item_level_str = char.get('ItemAvgLevel', '0')
+                                item_level = float(item_level_str.replace(',', ''))
+                                if item_level >= 1600:
+                                    filtered_characters.append(char)
+                            
+                            filtered_data[discord_id]['characters'] = filtered_characters
+                            original_count = len(data.get('characters', []))
+                            filtered_count = len(filtered_characters)
+                            print(f"  - 대표 캐릭터가 없어 기존 데이터 사용: 총 {original_count}개 중 레벨 1600 이상 {filtered_count}개 캐릭터")
                             continue
                         
                         # 모든 대표 캐릭터의 원정대 정보를 통합
@@ -134,26 +156,44 @@ async def load_member_characters(active_only=True, api_key=None):
                             siblings = await fetch_character_siblings(main_char, api_key)
                             
                             if siblings:
-                                # 원정대 캐릭터 추가 (중복 없이)
+                                # 원정대 캐릭터 추가 (중복 없이, 1600 레벨 이상만)
                                 for char in siblings:
                                     char_name = char.get('CharacterName', '')
-                                    if char_name and char_name not in all_characters:
+                                    item_level_str = char.get('ItemMaxLevel', '0')
+                                    item_level = float(item_level_str.replace(',', ''))
+                                    
+                                    if char_name and char_name not in all_characters and item_level >= 1600:
                                         all_characters.add(char_name)
                                         character_objects.append(char)
-                                        print(f"    - 캐릭터 '{char_name}' 추가됨 (레벨: {char.get('ItemMaxLevel', '0')})")
+                                        print(f"    - 캐릭터 '{char_name}' 추가됨 (레벨: {item_level_str})")
+                                    elif char_name and char_name not in all_characters:
+                                        print(f"    - 캐릭터 '{char_name}' 제외됨 (레벨: {item_level_str} < 1600)")
                             else:
                                 print(f"    ! 원정대 정보를 가져오지 못했습니다. API 오류 또는 제한")
                         
                         # 통합된 캐릭터 정보로 업데이트
                         filtered_data[discord_id]['characters'] = character_objects
-                        print(f"  - 최종 통합된 캐릭터 수: {len(character_objects)}개")
+                        print(f"  - 최종 통합된 캐릭터 수: {len(character_objects)}개 (모두 레벨 1600 이상)")
                         
                         # API 요청 제한 방지를 위한 지연
                         await asyncio.sleep(0.5)
                 
                 return filtered_data
             else:
-                return member_data
+                # 레벨 1600 미만 캐릭터 필터링
+                filtered_data = {}
+                for discord_id, data in member_data.items():
+                    filtered_characters = []
+                    for char in data.get('characters', []):
+                        item_level_str = char.get('ItemAvgLevel', '0')
+                        item_level = float(item_level_str.replace(',', ''))
+                        if item_level >= 1600:
+                            filtered_characters.append(char)
+                    
+                    filtered_data[discord_id] = data.copy()
+                    filtered_data[discord_id]['characters'] = filtered_characters
+                
+                return filtered_data
     except Exception as e:
         print(f"멤버 캐릭터 정보 로드 중 오류: {e}")
         return {}
@@ -193,7 +233,7 @@ def get_eligible_members(member_characters, min_level, max_level=None):
     
     return eligible_members
 
-async def create_raid_threads(client, channel_id, active_only=True, is_test=False):
+async def create_raid_threads(client, channel_id, active_only=True, is_test=False, api_key=None):
     """레이드 스레드 생성 함수"""
     try:
         # 채널 가져오기
@@ -228,9 +268,6 @@ async def create_raid_threads(client, channel_id, active_only=True, is_test=Fals
             return (min_level, max_level_value)
         
         raids.sort(key=raid_sort_key)
-        
-        # API 키 가져오기
-        api_key = client.config.get("LOSTARK_API_KEY", "")
         
         # 멤버 캐릭터 정보 로드 (API 키 전달)
         member_characters = await load_member_characters(active_only=active_only, api_key=api_key)

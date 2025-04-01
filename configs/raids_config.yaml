@@ -3,7 +3,7 @@
 raids:
   - name: "노기르"
     members: 8
-    min_level: 1660
+    min_level: 1640
     max_level: 1680
     description: "카제로스 1막 노말"
   

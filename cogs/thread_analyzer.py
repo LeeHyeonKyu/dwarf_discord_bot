@@ -8,6 +8,7 @@ import datetime
 import hashlib
 import pathlib
 from typing import Optional
+import re
 
 class ThreadAnalyzer(commands.Cog):
     """스레드 메시지를 분석하여 레이드 정보를 업데이트하는 Cog"""
@@ -159,17 +160,6 @@ class ThreadAnalyzer(commands.Cog):
 ## 스레드 대화 내용({message_count_info}):
 {messages_text}
 
-대화 내용을 분석하여 원본 메시지를 업데이트해주세요:
-1. 참가자 목록을 서포터와 딜러로 구분하여 추가하세요
-2. 참가자 이름은 디스코드 멘션 형식(<@사용자ID>)으로 변경해주세요
-   - 사용자 ID 정보: {json.dumps(user_ids, ensure_ascii=False)}
-3. 일정 정보(날짜, 시간)가 있으면 추가하세요
-   - 날짜 형식은 "월/일(요일)" 형태로 통일해주세요 (예: "7/5(수)")
-   - 시간은 24시간제로 표시해주세요 (예: "21:00")
-   - 날짜와 시간은 함께 표시하세요 (예: "7/5(수) 21:00")
-4. 추가 정보(메모, 특이사항 등)가 있으면 추가하세요
-5. 2차, 3차 등의 추가 일정이 언급되었다면 새 섹션으로 추가하세요
-
 ## 참가자 규칙:
 - 8인 레이드의 경우 서포터는 최대 2명까지만 가능합니다
 - 4인 레이드의 경우 서포터는 최대 1명만 가능합니다
@@ -178,8 +168,34 @@ class ThreadAnalyzer(commands.Cog):
 - 특정 차수를 지정하지 않은 경우, 모든 일정에 해당 참가자를 추가해야 합니다
 - 서포터가 이미 최대 인원인 경우, 새로운 차수(예: 다음 차수)를 생성하여 초과된 서포터를 배정하세요
 
-원본 메시지 형식을 유지하면서 대화 내용에서 파악한 정보를 채워넣은 완성된 메시지를 반환해주세요.
-추가 설명 없이 업데이트된 메시지 내용만 반환해주세요.
+## 분석 및 명령어 반환 요청:
+스레드 대화 내용을 분석하여 다음 명령어 형식으로 정보를 반환해주세요:
+
+```json
+{
+  "사용자명1": [
+    "add(1차, 딜러)",  // 1차에 딜러로 참가
+    "add(2차, 서포터)" // 2차에 서포터로 참가
+  ],
+  "사용자명2": [
+    "edit(1차, when: 7/5(수) 21:00)"  // 1차 일정 수정
+  ],
+  "일정": [
+    "add(2차, when: 7/6(목) 21:00)"  // 2차 일정 추가
+  ],
+  "notes": [
+    "add(1차, note: 숙련자만)"  // 1차 노트 추가/수정
+  ]
+}
+```
+
+- 사용자명은 디스코드 멘션 형식(<@사용자ID>)이 아닌 원래 사용자명을 그대로 사용하세요.
+- 사용자 ID 정보: {json.dumps(user_ids, ensure_ascii=False)}
+- "일정" 키는 when 정보를 수정할 때 사용합니다.
+- "notes" 키는 참고사항을 추가/수정할 때 사용합니다.
+- 명령어는 add, edit, remove 세 가지가 있습니다.
+- 변경이 필요한 사항만 간결하게 명령어로 표현하세요.
+- 오직 JSON 형식으로만 응답하세요.
 """
 
         try:
@@ -191,10 +207,11 @@ class ThreadAnalyzer(commands.Cog):
             payload = {
                 "model": "gpt-4o-mini",
                 "messages": [
-                    {"role": "system", "content": "당신은 디스코드 대화에서 정보를 추출하여 메시지를 업데이트하는 도우미입니다."},
+                    {"role": "system", "content": "당신은 디스코드 대화에서 정보를 추출하여 JSON 형식으로 명령어를 반환하는 도우미입니다."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.0
+                "temperature": 0.0,
+                "response_format": {"type": "json_object"}
             }
             
             print(f"OpenAI API 호출 중... (캐시 키: {cache_key[:8]}...)")
@@ -206,21 +223,24 @@ class ThreadAnalyzer(commands.Cog):
                 ) as response:
                     if response.status == 200:
                         response_data = await response.json()
-                        content = response_data['choices'][0]['message']['content']
+                        content = response_data['choices'][0]['message']['content'].strip()
                         
-                        # 텍스트 정제 (불필요한 설명이나 마크다운 포맷 제거)
-                        if "```" in content:
-                            # 코드 블록 내용만 추출
-                            content = content.split("```")[1].strip()
-                            if content.startswith("markdown\n") or content.startswith("md\n"):
-                                content = "\n".join(content.split("\n")[1:])
-                        
-                        result = {"content": content}
-                        
-                        # 결과를 캐시에 저장
-                        self._save_to_cache(cache_key, result)
-                        
-                        return result
+                        try:
+                            # JSON 파싱 시도
+                            commands = json.loads(content)
+                            result = {
+                                "commands": commands,
+                                "original_content": message_content
+                            }
+                            
+                            # 결과를 캐시에 저장
+                            self._save_to_cache(cache_key, result)
+                            print(f"명령어 응답을 성공적으로 파싱했습니다: {len(commands)} 사용자/항목")
+                            
+                            return result
+                        except json.JSONDecodeError as e:
+                            error_result = {"error": f"JSON 파싱 오류: {str(e)}", "raw_content": content}
+                            return error_result
                     else:
                         error_result = {"error": f"OpenAI API 오류: 상태 코드 {response.status}"}
                         return error_result
@@ -292,6 +312,220 @@ class ThreadAnalyzer(commands.Cog):
         # 시작 시 1분 대기 (봇 초기화 후 안정화 시간)
         await asyncio.sleep(60)
         
+    async def process_commands_and_update_message(self, message, commands, thread_name="", ctx=None):
+        """JSON 명령어를 처리하여 메시지를 업데이트하는 함수"""
+        try:
+            # 메시지 내용을 줄 단위로 분리하여 처리
+            lines = message.content.split('\n')
+            
+            # 차수 인덱스 찾기 (ex: "## 1차", "## 2차" 등)
+            round_indices = {}
+            for i, line in enumerate(lines):
+                if line.startswith('## ') and '차' in line:
+                    round_name = line.replace('## ', '').strip()
+                    round_indices[round_name] = i
+            
+            changes_made = False
+            changes_description = []
+            
+            # 명령어 처리
+            for user, user_commands in commands.items():
+                if user == "일정":
+                    # 일정 관련 명령
+                    for cmd in user_commands:
+                        if cmd.startswith('add('):
+                            # 새 차수 일정 추가
+                            match = re.search(r'add\(([^,]+),\s*when:\s*([^)]+)\)', cmd)
+                            if match:
+                                round_name = match.group(1)
+                                when_value = match.group(2)
+                                
+                                # 이미 해당 차수가 있는지 확인
+                                if round_name in round_indices:
+                                    # when 값 업데이트
+                                    round_index = round_indices[round_name]
+                                    for j in range(round_index + 1, len(lines)):
+                                        if lines[j].startswith('- when:'):
+                                            lines[j] = f'- when: {when_value}'
+                                            changes_made = True
+                                            changes_description.append(f"{round_name} 일정 설정: {when_value}")
+                                            break
+                                else:
+                                    # 새 차수 추가
+                                    last_round_index = max(round_indices.values()) if round_indices else 0
+                                    new_round_section = [
+                                        f"## {round_name}",
+                                        f"- when: {when_value}",
+                                        "- who: ",
+                                        "  - 서포터(0/2): ",
+                                        "  - 딜러(0/6): ",
+                                        "- note: "
+                                    ]
+                                    lines = lines[:last_round_index + 7] + new_round_section + lines[last_round_index + 7:]
+                                    round_indices[round_name] = last_round_index + 7
+                                    changes_made = True
+                                    changes_description.append(f"{round_name} 추가: {when_value}")
+                        
+                        elif cmd.startswith('edit('):
+                            # 기존 차수 일정 수정
+                            match = re.search(r'edit\(([^,]+),\s*when:\s*([^)]+)\)', cmd)
+                            if match:
+                                round_name = match.group(1)
+                                when_value = match.group(2)
+                                
+                                if round_name in round_indices:
+                                    round_index = round_indices[round_name]
+                                    for j in range(round_index + 1, len(lines)):
+                                        if lines[j].startswith('- when:'):
+                                            lines[j] = f'- when: {when_value}'
+                                            changes_made = True
+                                            changes_description.append(f"{round_name} 일정 수정: {when_value}")
+                                            break
+                
+                elif user == "notes":
+                    # 메모 관련 명령
+                    for cmd in user_commands:
+                        if cmd.startswith('add(') or cmd.startswith('edit('):
+                            # 메모 추가/수정
+                            match = re.search(r'(?:add|edit)\(([^,]+),\s*note:\s*([^)]+)\)', cmd)
+                            if match:
+                                round_name = match.group(1)
+                                note_value = match.group(2)
+                                
+                                if round_name in round_indices:
+                                    round_index = round_indices[round_name]
+                                    for j in range(round_index + 1, len(lines)):
+                                        if lines[j].startswith('- note:'):
+                                            lines[j] = f'- note: {note_value}'
+                                            changes_made = True
+                                            changes_description.append(f"{round_name} 메모 추가/수정: {note_value}")
+                                            break
+                
+                else:
+                    # 사용자 참가 관련 명령
+                    for cmd in user_commands:
+                        if cmd.startswith('add('):
+                            # 참가자 추가
+                            match = re.search(r'add\(([^,]+),\s*([^)]+)\)', cmd)
+                            if match:
+                                round_name = match.group(1)
+                                role = match.group(2)
+                                
+                                if round_name in round_indices:
+                                    round_index = round_indices[round_name]
+                                    
+                                    # 역할에 따라 적절한 라인 찾기
+                                    role_type = "서포터" if role.lower() in ["서포터", "폿", "서폿"] else "딜러"
+                                    
+                                    for j in range(round_index + 1, len(lines)):
+                                        if f"{role_type}(" in lines[j]:
+                                            # 현재 인원 수 파싱
+                                            current_line = lines[j]
+                                            count_pattern = rf"{role_type}\((\d+)/(\d+)\):"
+                                            count_match = re.search(count_pattern, current_line)
+                                            
+                                            if count_match:
+                                                current_count = int(count_match.group(1))
+                                                max_count = int(count_match.group(2))
+                                                
+                                                # 인원 수 업데이트
+                                                new_count = current_count + 1
+                                                if new_count <= max_count:
+                                                    # 라인 업데이트: 새 참가자 추가
+                                                    if ": " in current_line:
+                                                        if current_line.endswith(': '):
+                                                            # 첫 번째 참가자
+                                                            lines[j] = f"{current_line}{user}"
+                                                        else:
+                                                            # 기존 참가자에 추가
+                                                            lines[j] = f"{current_line}, {user}"
+                                                    
+                                                    # 인원 수 텍스트 업데이트
+                                                    lines[j] = lines[j].replace(f"{role_type}({current_count}/{max_count}):", f"{role_type}({new_count}/{max_count}):")
+                                                    
+                                                    changes_made = True
+                                                    changes_description.append(f"{user} {round_name}에 {role_type}로 참가")
+                                            break
+                        
+                        elif cmd.startswith('remove('):
+                            # 참가자 제거
+                            match = re.search(r'remove\(([^,]+),\s*([^)]+)\)', cmd)
+                            if match:
+                                round_name = match.group(1)
+                                role = match.group(2)
+                                
+                                if round_name in round_indices:
+                                    round_index = round_indices[round_name]
+                                    
+                                    # 역할에 따라 적절한 라인 찾기
+                                    role_type = "서포터" if role.lower() in ["서포터", "폿", "서폿"] else "딜러"
+                                    
+                                    for j in range(round_index + 1, len(lines)):
+                                        if f"{role_type}(" in lines[j] and user in lines[j]:
+                                            # 현재 인원 수 파싱
+                                            current_line = lines[j]
+                                            count_pattern = rf"{role_type}\((\d+)/(\d+)\):"
+                                            count_match = re.search(count_pattern, current_line)
+                                            
+                                            if count_match:
+                                                current_count = int(count_match.group(1))
+                                                max_count = int(count_match.group(2))
+                                                
+                                                # 인원 수 업데이트
+                                                new_count = max(0, current_count - 1)
+                                                
+                                                # 참가자 제거
+                                                if f", {user}" in current_line:
+                                                    current_line = current_line.replace(f", {user}", "")
+                                                elif f"{user}, " in current_line:
+                                                    current_line = current_line.replace(f"{user}, ", "")
+                                                else:
+                                                    current_line = current_line.replace(user, "")
+                                                
+                                                # 인원 수 텍스트 업데이트
+                                                current_line = current_line.replace(f"{role_type}({current_count}/{max_count}):", f"{role_type}({new_count}/{max_count}):")
+                                                
+                                                lines[j] = current_line
+                                                changes_made = True
+                                                changes_description.append(f"{user} {round_name}에서 {role_type} 참가 취소")
+                                            break
+            
+            if changes_made:
+                # 업데이트된 내용으로 메시지 수정
+                updated_content = '\n'.join(lines)
+                
+                # 메시지 길이 제한 확인
+                if len(updated_content) > 2000:
+                    print(f"경고: 메시지가 Discord 길이 제한(2000자)을 초과합니다. 길이: {len(updated_content)}자")
+                    updated_content = updated_content[:1997] + "..."
+                
+                await message.edit(content=updated_content)
+                
+                # 결과 반환
+                changes_summary = "\n".join(changes_description)
+                log_message = f"'{thread_name}' 메시지 업데이트 완료: {len(changes_description)}개 변경\n{changes_summary}"
+                print(log_message)
+                
+                if ctx:
+                    await ctx.send(f"메시지 업데이트 완료: {len(changes_description)}개 변경\n{changes_summary}")
+                
+                return True, changes_description
+            else:
+                log_message = f"'{thread_name}' 메시지 변경 사항이 없습니다."
+                print(log_message)
+                
+                if ctx:
+                    await ctx.send("메시지 변경 사항이 없습니다.")
+                
+                return False, []
+                
+        except Exception as e:
+            error_message = f"명령어 처리 중 오류 발생: {e}"
+            print(error_message)
+            if ctx:
+                await ctx.send(error_message)
+            return False, [error_message]
+
     async def auto_update_raid_message(self, thread):
         """(자동) 스레드 내 메시지 분석하여 원본 레이드 메시지 업데이트"""
         try:
@@ -340,19 +574,25 @@ class ThreadAnalyzer(commands.Cog):
                 return
             
             # OpenAI를 사용하여 메시지 분석
+            print(f"'{thread.name}' 스레드 메시지 분석 시작 (새 메시지 {len(thread_messages)}개)")
             analysis_result = await self.analyze_messages_with_openai(thread_messages, message.content, raid_name)
             
             if "error" in analysis_result:
                 print(f"메시지 분석 오류: {analysis_result['error']}")
                 return
             
-            # 메시지 업데이트
-            await message.edit(content=analysis_result["content"])
-            print(f"'{thread.name}' 스레드 메시지가 자동으로 업데이트되었습니다.")
+            # 명령어 처리 및 메시지 업데이트
+            if "commands" in analysis_result:
+                await self.process_commands_and_update_message(
+                    message=message,
+                    commands=analysis_result["commands"],
+                    thread_name=thread.name
+                )
+            else:
+                print(f"'{thread.name}' 스레드 메시지 분석 결과에 commands가 없습니다.")
             
         except Exception as e:
             print(f"자동 메시지 업데이트 오류: {e}")
-            raise
     
     @commands.command(name="analyze")
     @commands.has_permissions(manage_messages=True)
@@ -475,16 +715,33 @@ class ThreadAnalyzer(commands.Cog):
                 await ctx.send("봇의 마지막 메시지 이후에 새로운 메시지가 없습니다. 분석이 필요하지 않습니다.")
                 return
             
+            # 진행 상황 메시지
+            progress_msg = await ctx.send(f"'{thread.name}' 스레드 메시지 분석 중... (새 메시지 {len(thread_messages)}개)")
+            
             # OpenAI를 사용하여 메시지 분석
             analysis_result = await self.analyze_messages_with_openai(thread_messages, message.content, raid_name)
             
             if "error" in analysis_result:
-                await ctx.send(f"메시지 분석 오류: {analysis_result['error']}")
+                await progress_msg.edit(content=f"메시지 분석 오류: {analysis_result['error']}")
+                if "raw_content" in analysis_result:
+                    await ctx.send(f"원본 응답:\n```json\n{analysis_result['raw_content'][:1000]}\n```")
                 return
             
-            # 메시지 업데이트
-            await message.edit(content=analysis_result["content"])
-            await ctx.send("레이드 메시지가 업데이트되었습니다.")
+            # 명령어 처리 및 메시지 업데이트
+            if "commands" in analysis_result:
+                success, changes = await self.process_commands_and_update_message(
+                    message=message,
+                    commands=analysis_result["commands"],
+                    thread_name=thread.name,
+                    ctx=ctx
+                )
+                
+                if success:
+                    await progress_msg.edit(content=f"'{thread.name}' 스레드 메시지가 업데이트되었습니다.")
+                else:
+                    await progress_msg.edit(content=f"'{thread.name}' 스레드 메시지 업데이트 중 문제가 발생했습니다.")
+            else:
+                await progress_msg.edit(content=f"'{thread.name}' 스레드 메시지 분석 결과에 commands가 없습니다.")
             
         except Exception as e:
             print(f"레이드 메시지 업데이트 오류: {e}")

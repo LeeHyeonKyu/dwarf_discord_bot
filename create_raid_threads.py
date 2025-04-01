@@ -10,6 +10,7 @@ load_dotenv('.env.secret')
 TOKEN = os.getenv('DISCORD_TOKEN')
 SCHEDULE_CHANNEL_ID = int(os.getenv('SCHEDULE_CHANNEL_ID', '0'))
 TEST_CHANNEL_ID = int(os.getenv('TEST_CHANNEL_ID', '0'))
+LOSTARK_API_KEY = os.getenv('LOSTARK_API_KEY', '')  # 로스트아크 API 키 로드
 
 # 인텐트 설정
 intents = discord.Intents.default()
@@ -30,8 +31,19 @@ async def on_ready():
     channel_type = "테스트" if is_test else "일반"
     
     print(f"{channel_type} 모드로 레이드 스레드를 생성합니다...")
+    
+    # API 키 확인
+    if not LOSTARK_API_KEY:
+        print("경고: LOSTARK_API_KEY가 설정되어 있지 않아 원정대 정보를 가져올 수 없습니다.")
+    
     # 레이드 스레드 생성 (활성화된 멤버만)
-    success = await create_raid_threads(client, channel_id, active_only=True, is_test=is_test)
+    success = await create_raid_threads(
+        client, 
+        channel_id, 
+        active_only=True, 
+        is_test=is_test,
+        api_key=LOSTARK_API_KEY
+    )
     # 작업 완료 후 봇 종료
     await client.close()
 
