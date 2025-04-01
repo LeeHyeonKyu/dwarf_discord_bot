@@ -470,6 +470,9 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
             
             # 2. 변환 및 검증
             formatted_changes = []
+            
+            logger.info(f"원본 명령: {json.dumps(commands, ensure_ascii=False)}")
+            
             for change in commands.get("changes", []):
                 try:
                     # API 응답 형식에서 공통 형식으로 변환
@@ -499,6 +502,8 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
                             "round_name": change.get("round", ""),
                             "schedule": change.get("when", "")
                         })
+                        logger.info(f"차수 추가 변환 전: {json.dumps(change, ensure_ascii=False)}")
+                        logger.info(f"차수 추가 변환 후: {json.dumps(formatted_change, ensure_ascii=False)}")
                     elif change.get("type") == "update_note":
                         formatted_change.update({
                             "round_name": change.get("round", ""),
@@ -509,15 +514,23 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
                 except Exception as e:
                     logger.error(f"명령어 변환 중 오류: {e}")
             
+            logger.info(f"변환된 명령: {json.dumps(formatted_changes, ensure_ascii=False)}")
+            
             # 3. 명령어를 데이터 구조에 적용
             changes_applied = await self.apply_changes_to_data(raid_data, formatted_changes)
+            
+            logger.info(f"적용된 변경사항: {changes_applied}")
             
             if changes_applied:
                 # 4. 업데이트된 데이터 구조를 기반으로 새 메시지 내용 생성
                 updated_content = await self.format_data_to_message(raid_data)
                 
+                logger.info(f"생성된 메시지 내용 길이: {len(updated_content)}")
+                
                 # 5. 메시지 업데이트
                 update_result = await self.update_message_safely(message, updated_content)
+                
+                logger.info(f"메시지 업데이트 결과: {update_result}")
                 
                 if update_result["status"] == "success":
                     changes_summary = "\n".join(changes_applied)

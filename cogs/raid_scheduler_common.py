@@ -128,8 +128,14 @@ class RaidSchedulerBase:
     
     async def is_empty_round(self, round_info):
         """차수가 빈 상태인지 확인 (참가자 없음)"""
-        return (len(round_info.confirmed_supporters) == 0 and 
-                len(round_info.confirmed_dealers) == 0)
+        # 참가자가 없어도 일정이 지정되어 있으면 빈 차수로 간주하지 않음
+        has_participants = (len(round_info.confirmed_supporters) > 0 or 
+                          len(round_info.confirmed_dealers) > 0)
+        
+        # 일정이 있거나 노트가 있으면 빈 차수가 아님
+        has_information = bool(round_info.when.strip() or round_info.note.strip())
+        
+        return not (has_participants or has_information)
 
     async def clean_empty_rounds(self, raid_data):
         """빈 차수 제거"""
@@ -251,6 +257,7 @@ class RaidSchedulerBase:
                     else:
                         # 차수가 지정되지 않은 경우, 후순위(마지막) 차수부터 지정된 개수만큼 제거
                         rounds_reversed = list(reversed(raid_data.rounds))  # 후순위부터 처리
+                        logger.info(f"차수 미지정 제거: 사용자={user_name}, 역할={role}, 제거 수={role_count}")
                         
                         # 역할이 지정된 경우, 해당 역할만 지정된 개수만큼 제거
                         if role.lower() in ["서포터", "서폿", "support", "supporter"]:
@@ -266,6 +273,7 @@ class RaidSchedulerBase:
                                     r.confirmed_supporters = [s for s in r.confirmed_supporters if s[0] != user_name]
                                     changes_applied.append(f"{user_name}님이 {r.name}의 서포터에서 제거됨")
                                     removed_count += 1
+                                    logger.info(f"서포터 제거: 사용자={user_name}, 차수={r.name}, 남은 제거 수={role_count-removed_count}")
                         
                         elif role.lower() in ["딜러", "딜", "dps", "dealer", "damage"]:
                             removed_count = 0
@@ -280,21 +288,25 @@ class RaidSchedulerBase:
                                     r.confirmed_dealers = [d for d in r.confirmed_dealers if d[0] != user_name]
                                     changes_applied.append(f"{user_name}님이 {r.name}의 딜러에서 제거됨")
                                     removed_count += 1
+                                    logger.info(f"딜러 제거: 사용자={user_name}, 차수={r.name}, 남은 제거 수={role_count-removed_count}")
                         
                         # 역할이 지정되지 않은 경우, 모든 차수에서 모든 역할 제거
                         elif not role:
+                            logger.info(f"모든 역할 제거: 사용자={user_name}")
                             for r in raid_data.rounds:
                                 # 서포터에서 제거
                                 before_count = len(r.confirmed_supporters)
                                 r.confirmed_supporters = [s for s in r.confirmed_supporters if s[0] != user_name]
                                 if before_count > len(r.confirmed_supporters):
                                     changes_applied.append(f"{user_name}님이 {r.name}의 서포터에서 제거됨")
+                                    logger.info(f"서포터 제거: 사용자={user_name}, 차수={r.name}")
                                 
                                 # 딜러에서 제거
                                 before_count = len(r.confirmed_dealers)
                                 r.confirmed_dealers = [d for d in r.confirmed_dealers if d[0] != user_name]
                                 if before_count > len(r.confirmed_dealers):
                                     changes_applied.append(f"{user_name}님이 {r.name}의 딜러에서 제거됨")
+                                    logger.info(f"딜러 제거: 사용자={user_name}, 차수={r.name}")
                 
                 elif change_type == "update_schedule":
                     # 일정 업데이트
@@ -455,8 +467,11 @@ class RaidSchedulerBase:
             if not stripped_line:
                 continue
             
-            # 새 차수 시작 확인
-            round_match = re.match(r'^(\d+)차$', stripped_line)
+            # 새 차수 시작 확인 - '## N차' 형식
+            round_match = re.match(r'^##\s+(\d+)차$', stripped_line)
+            if not round_match:  # 기존 형식도 지원
+                round_match = re.match(r'^(\d+)차$', stripped_line)
+                
             if round_match:
                 current_section = "round"
                 # 이전 차수 저장
@@ -478,11 +493,15 @@ class RaidSchedulerBase:
             # round 섹션 처리
             if current_section == "round" and current_round is not None:
                 # when 정보
-                if stripped_line.startswith("when:"):
+                if stripped_line.startswith("- when:"):
+                    current_round.when = stripped_line[7:].strip()
+                elif stripped_line.startswith("when:"):  # 기존 형식도 지원
                     current_round.when = stripped_line[5:].strip()
+                
                 # who 정보
-                elif stripped_line.startswith("who:"):
-                    who_value = stripped_line[4:].strip()
+                elif stripped_line.startswith("- who:") or stripped_line.startswith("who:"):
+                    continue  # who: 라인은 정보가 없으므로 건너뜀
+                
                 # 서포터 정보
                 elif "서포터" in stripped_line and ":" in stripped_line:
                     parts = stripped_line.split(":", 1)
@@ -502,7 +521,9 @@ class RaidSchedulerBase:
                         current_round.confirmed_dealers = [(d, "") for d in dealers]
                 
                 # 노트 정보
-                elif stripped_line.startswith("note:"):
+                elif stripped_line.startswith("- note:"):
+                    current_round.note = stripped_line[7:].strip()
+                elif stripped_line.startswith("note:"):  # 기존 형식도 지원
                     current_round.note = stripped_line[5:].strip()
         
         # 마지막 차수 추가 (비어있지 않은 경우만)
@@ -527,19 +548,19 @@ class RaidSchedulerBase:
                 continue
                 
             lines.append("")  # 차수 구분을 위한 빈 줄
-            lines.append(f"{round_info.name}")
-            lines.append(f"when:{round_info.when}")
-            lines.append(f"who:")
+            lines.append(f"## {round_info.name}")
+            lines.append(f"- when: {round_info.when}")
+            lines.append(f"- who:")
             
             # 서포터 정보
             supporters_str = ", ".join([s[0] for s in round_info.confirmed_supporters]) if round_info.confirmed_supporters else ""
-            lines.append(f"서포터({len(round_info.confirmed_supporters)}/{round_info.supporter_max}):{supporters_str}")
+            lines.append(f"  - 서포터({len(round_info.confirmed_supporters)}/{round_info.supporter_max}): {supporters_str}")
             
             # 딜러 정보
             dealers_str = ", ".join([d[0] for d in round_info.confirmed_dealers]) if round_info.confirmed_dealers else ""
-            lines.append(f"딜러({len(round_info.confirmed_dealers)}/{round_info.dealer_max}):{dealers_str}")
+            lines.append(f"  - 딜러({len(round_info.confirmed_dealers)}/{round_info.dealer_max}): {dealers_str}")
             
             # 노트 정보
-            lines.append(f"note:{round_info.note}")
+            lines.append(f"- note: {round_info.note}")
         
         return "\n".join(lines) 
