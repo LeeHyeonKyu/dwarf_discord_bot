@@ -28,12 +28,13 @@ class ThreadAnalyzer(commands.Cog):
         # 오래된 캐시 파일 정리
         self.cleanup_cache()
         
-        # 자동 분석 작업 시작
-        self.auto_analyze_threads.start()
+        # 자동 분석 작업 시작 - 비활성화
+        # self.auto_analyze_threads.start()
+        print("자동 스레드 분석 스케줄러가 비활성화되었습니다.")
     
     async def cog_unload(self):
         """Cog가 언로드될 때 작업 중지"""
-        self.auto_analyze_threads.cancel()
+        # self.auto_analyze_threads.cancel()
     
     @commands.Cog.listener()
     async def on_ready(self):
