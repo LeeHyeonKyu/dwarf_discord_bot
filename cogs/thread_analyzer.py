@@ -41,11 +41,23 @@ class ThreadAnalyzer(commands.Cog):
     async def get_thread_messages(self, thread):
         """스레드에서 메시지 가져오기"""
         messages = []
+        latest_bot_message_time = None
         
         try:
-            # 스레드의 모든 메시지 가져오기
+            # 가장 최근 봇 메시지 찾기 (역순으로 검색)
+            async for message in thread.history(limit=100, oldest_first=False):
+                if message.author.bot and message.author.id == self.bot.user.id:
+                    latest_bot_message_time = message.created_at
+                    break
+            
+            # 메시지 수집 (시간순으로)
             async for message in thread.history(limit=100, oldest_first=True):
+                # 봇 메시지 제외
                 if message.author.bot:
+                    continue
+                
+                # 봇의 마지막 메시지 이후 메시지만 포함
+                if latest_bot_message_time and message.created_at <= latest_bot_message_time:
                     continue
                 
                 # 메시지 생성 시간 변환
@@ -58,6 +70,12 @@ class ThreadAnalyzer(commands.Cog):
                     'content': message.content,
                     'created_at': created_at
                 })
+            
+            # 디버그 메시지
+            if latest_bot_message_time:
+                print(f"봇의 마지막 메시지 이후 {len(messages)}개의 새 메시지 수집 ({latest_bot_message_time.strftime('%Y-%m-%d %H:%M:%S')})")
+            else:
+                print(f"봇 메시지가 없어 모든 사용자 메시지 {len(messages)}개 수집")
             
             return messages
         
@@ -126,6 +144,11 @@ class ThreadAnalyzer(commands.Cog):
         for msg in thread_messages:
             user_ids[msg['author']] = msg['author_id']
         
+        # 메시지 개수에 대한 정보
+        message_count_info = f"분석 대상: 봇이 마지막으로 보낸 메시지 이후의 {len(thread_messages)}개 메시지"
+        if not thread_messages:
+            message_count_info = "새로운 메시지가 없습니다."
+        
         # OpenAI에 보낼 프롬프트
         prompt = f"""
 이것은 '{raid_name}' 레이드 참가에 관한 디스코드 스레드의 원본 메시지와 대화 내용입니다.
@@ -133,7 +156,7 @@ class ThreadAnalyzer(commands.Cog):
 ## 원본 메시지:
 {message_content}
 
-## 스레드 대화 내용:
+## 스레드 대화 내용({message_count_info}):
 {messages_text}
 
 대화 내용을 분석하여 원본 메시지를 업데이트해주세요:
@@ -310,8 +333,10 @@ class ThreadAnalyzer(commands.Cog):
                 
             # 스레드 메시지 가져오기
             thread_messages = await self.get_thread_messages(thread)
+            
+            # 새 메시지가 없는 경우 업데이트 건너뛰기
             if not thread_messages:
-                print(f"'{thread.name}' 스레드에 분석할 메시지가 없습니다.")
+                print(f"'{thread.name}' 스레드에 새로운 메시지가 없어 업데이트를 건너뜁니다.")
                 return
             
             # OpenAI를 사용하여 메시지 분석
@@ -444,8 +469,10 @@ class ThreadAnalyzer(commands.Cog):
                 
             # 스레드 메시지 가져오기
             thread_messages = await self.get_thread_messages(thread)
+            
+            # 새 메시지가 없는 경우
             if not thread_messages:
-                await ctx.send("분석할 메시지가 없습니다.")
+                await ctx.send("봇의 마지막 메시지 이후에 새로운 메시지가 없습니다. 분석이 필요하지 않습니다.")
                 return
             
             # OpenAI를 사용하여 메시지 분석
