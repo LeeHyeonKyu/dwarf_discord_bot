@@ -3,6 +3,8 @@ import yaml
 import json
 import os
 import asyncio
+import requests
+import urllib.parse
 
 # 파일 경로 설정
 RAIDS_CONFIG_PATH = 'configs/raids_config.yaml'
@@ -32,57 +34,122 @@ async def load_members_config():
         print(f"멤버 구성 정보 로드 중 오류: {e}")
         return []
 
-async def load_member_characters(active_only=True):
-    """멤버별 캐릭터 정보 로드"""
+async def fetch_character_siblings(character_name, api_key):
+    """로스트아크 API를 사용하여 캐릭터의 계정 내 캐릭터 목록 가져오기"""
+    if not character_name:
+        print("캐릭터 이름이 제공되지 않았습니다.")
+        return None
+    
+    try:
+        # API 호출에 필요한 헤더 설정
+        headers = {
+            'accept': 'application/json',
+            'authorization': f'bearer {api_key}'
+        }
+        
+        # 계정 내 캐릭터 목록 조회
+        siblings_url = f'https://developer-lostark.game.onstove.com/characters/{urllib.parse.quote(character_name)}/siblings'
+        response = requests.get(siblings_url, headers=headers)
+        
+        # 응답 코드 확인
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 429:
+            print(f"API 요청 한도 초과: {response.headers.get('X-RateLimit-Remaining', 'N/A')}")
+            return None
+        else:
+            print(f"API 요청 실패: 상태 코드 {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"캐릭터 원정대 정보 조회 중 오류: {e}")
+        return None
+
+async def load_member_characters(active_only=True, api_key=None):
+    """멤버별 캐릭터 정보 로드 (API 호출로 모든 대표 캐릭터의 원정대 정보 통합)"""
     try:
         with open(MEMBER_CHARACTERS_PATH, 'r', encoding='utf-8') as f:
             member_data = json.load(f)
             
             if active_only:
-                # 활성화된 멤버와 main_characters 정보 로드
+                # 활성화된 멤버 로드
                 active_members = await load_members_config()
                 
-                # main_characters와 discord_id 매핑
-                member_main_chars = {}
+                # discord_id와 main_characters 매핑
+                active_member_info = {}
                 for member in active_members:
                     discord_id = member.get('discord_id', '')
                     main_characters = member.get('main_characters', [])
                     if discord_id:
-                        member_main_chars[discord_id] = main_characters
+                        active_member_info[discord_id] = {
+                            'id': member.get('id', ''),
+                            'main_characters': main_characters
+                        }
                 
-                # 활성화된 멤버만 필터링하고, main_characters에 있는 캐릭터만 포함
-                filtered_data = {}
-                for discord_id, data in member_data.items():
-                    if discord_id in member_main_chars:
-                        # 멤버의 메인 캐릭터 목록
-                        main_char_names = member_main_chars[discord_id]
-                        
-                        # 기존 캐릭터 데이터 복사
-                        filtered_data[discord_id] = data.copy()
-                        
-                        # main_characters에 있는 캐릭터만 필터링
-                        if main_char_names:  # 메인 캐릭터 목록이 있는 경우
-                            filtered_chars = []
-                            all_chars = data.get('characters', [])
+                # 로스트아크 API 키가 없으면 API 조회를 건너뜀
+                if not api_key:
+                    print("로스트아크 API 키가 없어 추가 원정대 정보를 가져오지 않습니다.")
+                    
+                    # 활성화된 멤버만 필터링
+                    filtered_data = {}
+                    for discord_id, data in member_data.items():
+                        if discord_id in active_member_info:
+                            # 기존 데이터 사용
+                            filtered_data[discord_id] = data.copy()
                             
                             # 로그 출력
-                            print(f"멤버 {data.get('id', 'Unknown')}({discord_id})의 메인 캐릭터 필터링: {main_char_names}")
+                            member_id = active_member_info[discord_id]['id']
+                            main_characters = active_member_info[discord_id]['main_characters']
+                            print(f"멤버 {member_id}({discord_id})의 대표 캐릭터: {main_characters}")
+                            print(f"  - API 조회 없이 기존 데이터 사용: {len(data.get('characters', []))}개 캐릭터")
+                    
+                    return filtered_data
+                
+                # 활성화된 멤버만 필터링하고 모든 대표 캐릭터의 원정대 통합
+                filtered_data = {}
+                for discord_id, data in member_data.items():
+                    if discord_id in active_member_info:
+                        member_id = active_member_info[discord_id]['id']
+                        main_characters = active_member_info[discord_id]['main_characters']
+                        
+                        # 기본 정보 복사 (나중에 characters 필드를 업데이트함)
+                        filtered_data[discord_id] = data.copy()
+                        
+                        # 로그 출력
+                        print(f"멤버 {member_id}({discord_id})의 대표 캐릭터: {main_characters}")
+                        
+                        # 대표 캐릭터가 없는 경우 기존 데이터 사용
+                        if not main_characters:
+                            print(f"  - 대표 캐릭터가 없어 기존 데이터 사용: {len(data.get('characters', []))}개 캐릭터")
+                            continue
+                        
+                        # 모든 대표 캐릭터의 원정대 정보를 통합
+                        all_characters = set()  # 중복 방지를 위해 집합 사용
+                        character_objects = []
+                        
+                        for main_char in main_characters:
+                            print(f"  - 대표 캐릭터 '{main_char}'의 원정대 정보 조회 중...")
                             
-                            for char in all_chars:
-                                char_name = char.get('CharacterName', '')
-                                if char_name in main_char_names:
-                                    filtered_chars.append(char)
-                                    print(f"  - 메인 캐릭터 '{char_name}' 추가됨 (레벨: {char.get('ItemMaxLevel', '0')})")
+                            # API를 통해 원정대 정보 가져오기
+                            siblings = await fetch_character_siblings(main_char, api_key)
                             
-                            # 필터링된 캐릭터로 업데이트
-                            filtered_data[discord_id]['characters'] = filtered_chars
-                            filtered_data[discord_id]['main_characters'] = main_char_names
-                            
-                            if not filtered_chars:
-                                print(f"  ! 주의: 멤버 {data.get('id', 'Unknown')}의 메인 캐릭터가 characters 목록에 없습니다.")
-                        else:
-                            # 메인 캐릭터 목록이 비어있으면 모든 캐릭터 사용
-                            print(f"멤버 {data.get('id', 'Unknown')}는 메인 캐릭터가 지정되지 않아 모든 캐릭터를 사용합니다.")
+                            if siblings:
+                                # 원정대 캐릭터 추가 (중복 없이)
+                                for char in siblings:
+                                    char_name = char.get('CharacterName', '')
+                                    if char_name and char_name not in all_characters:
+                                        all_characters.add(char_name)
+                                        character_objects.append(char)
+                                        print(f"    - 캐릭터 '{char_name}' 추가됨 (레벨: {char.get('ItemMaxLevel', '0')})")
+                            else:
+                                print(f"    ! 원정대 정보를 가져오지 못했습니다. API 오류 또는 제한")
+                        
+                        # 통합된 캐릭터 정보로 업데이트
+                        filtered_data[discord_id]['characters'] = character_objects
+                        print(f"  - 최종 통합된 캐릭터 수: {len(character_objects)}개")
+                        
+                        # API 요청 제한 방지를 위한 지연
+                        await asyncio.sleep(0.5)
                 
                 return filtered_data
             else:
@@ -162,8 +229,11 @@ async def create_raid_threads(client, channel_id, active_only=True, is_test=Fals
         
         raids.sort(key=raid_sort_key)
         
-        # 멤버 캐릭터 정보 로드
-        member_characters = await load_member_characters(active_only=active_only)
+        # API 키 가져오기
+        api_key = client.config.get("LOSTARK_API_KEY", "")
+        
+        # 멤버 캐릭터 정보 로드 (API 키 전달)
+        member_characters = await load_member_characters(active_only=active_only, api_key=api_key)
         if not member_characters:
             member_status = "활성화된 " if active_only else ""
             print(f"{member_status}멤버의 캐릭터 정보가 없습니다.")
