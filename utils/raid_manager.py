@@ -39,15 +39,50 @@ async def load_member_characters(active_only=True):
             member_data = json.load(f)
             
             if active_only:
-                # 활성화된 멤버만 확인
+                # 활성화된 멤버와 main_characters 정보 로드
                 active_members = await load_members_config()
-                active_discord_ids = [member.get('discord_id', '') for member in active_members]
                 
-                # 활성화된 멤버만 필터링
+                # main_characters와 discord_id 매핑
+                member_main_chars = {}
+                for member in active_members:
+                    discord_id = member.get('discord_id', '')
+                    main_characters = member.get('main_characters', [])
+                    if discord_id:
+                        member_main_chars[discord_id] = main_characters
+                
+                # 활성화된 멤버만 필터링하고, main_characters에 있는 캐릭터만 포함
                 filtered_data = {}
                 for discord_id, data in member_data.items():
-                    if discord_id in active_discord_ids:
-                        filtered_data[discord_id] = data
+                    if discord_id in member_main_chars:
+                        # 멤버의 메인 캐릭터 목록
+                        main_char_names = member_main_chars[discord_id]
+                        
+                        # 기존 캐릭터 데이터 복사
+                        filtered_data[discord_id] = data.copy()
+                        
+                        # main_characters에 있는 캐릭터만 필터링
+                        if main_char_names:  # 메인 캐릭터 목록이 있는 경우
+                            filtered_chars = []
+                            all_chars = data.get('characters', [])
+                            
+                            # 로그 출력
+                            print(f"멤버 {data.get('id', 'Unknown')}({discord_id})의 메인 캐릭터 필터링: {main_char_names}")
+                            
+                            for char in all_chars:
+                                char_name = char.get('CharacterName', '')
+                                if char_name in main_char_names:
+                                    filtered_chars.append(char)
+                                    print(f"  - 메인 캐릭터 '{char_name}' 추가됨 (레벨: {char.get('ItemMaxLevel', '0')})")
+                            
+                            # 필터링된 캐릭터로 업데이트
+                            filtered_data[discord_id]['characters'] = filtered_chars
+                            filtered_data[discord_id]['main_characters'] = main_char_names
+                            
+                            if not filtered_chars:
+                                print(f"  ! 주의: 멤버 {data.get('id', 'Unknown')}의 메인 캐릭터가 characters 목록에 없습니다.")
+                        else:
+                            # 메인 캐릭터 목록이 비어있으면 모든 캐릭터 사용
+                            print(f"멤버 {data.get('id', 'Unknown')}는 메인 캐릭터가 지정되지 않아 모든 캐릭터를 사용합니다.")
                 
                 return filtered_data
             else:
