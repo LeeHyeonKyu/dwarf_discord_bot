@@ -281,12 +281,21 @@ class ThreadAnalyzer(commands.Cog):
             # 스레드의 소유자 메시지 찾기
             message = None
             async for msg in channel.history(limit=100):
-                for thrd in msg.threads:
-                    if thrd.id == thread.id:
+                try:
+                    # 메시지에 직접 threads 속성 접근 대신 스레드 ID와 스레드 시작 메시지 ID 비교
+                    if hasattr(thread, 'starter_message_id') and thread.starter_message_id == msg.id:
                         message = msg
                         break
-                if message:
-                    break
+                except Exception as e:
+                    print(f"메시지 확인 중 오류: {e}")
+                    continue
+            
+            # 찾지 못한 경우 스레드 이름으로 검색
+            if not message:
+                async for msg in channel.history(limit=100):
+                    if thread.name.lower() in msg.content.lower():
+                        message = msg
+                        break
             
             if not message:
                 print(f"'{thread.name}' 스레드의 원본 메시지를 찾을 수 없습니다.")
@@ -406,12 +415,21 @@ class ThreadAnalyzer(commands.Cog):
             # 스레드의 소유자 메시지 찾기
             message = None
             async for msg in channel.history(limit=100):
-                for thrd in msg.threads:
-                    if thrd.id == thread.id:
+                try:
+                    # 메시지에 직접 threads 속성 접근 대신 스레드 ID와 스레드 시작 메시지 ID 비교
+                    if hasattr(thread, 'starter_message_id') and thread.starter_message_id == msg.id:
                         message = msg
                         break
-                if message:
-                    break
+                except Exception as e:
+                    print(f"메시지 확인 중 오류: {e}")
+                    continue
+            
+            # 찾지 못한 경우 스레드 이름으로 검색
+            if not message:
+                async for msg in channel.history(limit=100):
+                    if thread.name.lower() in msg.content.lower():
+                        message = msg
+                        break
             
             if not message:
                 await ctx.send("레이드 메시지를 찾을 수 없습니다.")
