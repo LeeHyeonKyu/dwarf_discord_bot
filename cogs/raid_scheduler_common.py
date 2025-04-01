@@ -211,6 +211,14 @@ class RaidSchedulerBase:
                         logger.warning(f"참가자 제거 정보 부족: {change}")
                         continue
                     
+                    # 숫자+역할 형식 파싱 (예: "2딜", "3서폿" 등)
+                    role_count = 1  # 기본값: 1개 역할 제거
+                    if not round_name and role:
+                        count_match = re.match(r'^(\d+)(.+)$', role)
+                        if count_match:
+                            role_count = int(count_match.group(1))
+                            role = count_match.group(2)  # 숫자를 제외한 역할명만 추출
+                    
                     # 특정 차수에서 제거 (round_name이 있는 경우)
                     if round_name:
                         for r in raid_data.rounds:
@@ -241,29 +249,37 @@ class RaidSchedulerBase:
                                         changes_applied.append(f"{user_name}님이 {r.name}의 딜러에서 제거됨")
                                 break
                     else:
-                        # 차수가 지정되지 않은 경우, 후순위(마지막) 차수부터 한 개씩만 제거
+                        # 차수가 지정되지 않은 경우, 후순위(마지막) 차수부터 지정된 개수만큼 제거
                         rounds_reversed = list(reversed(raid_data.rounds))  # 후순위부터 처리
                         
-                        # 역할이 지정된 경우, 해당 역할만 한 번만 제거
+                        # 역할이 지정된 경우, 해당 역할만 지정된 개수만큼 제거
                         if role.lower() in ["서포터", "서폿", "support", "supporter"]:
+                            removed_count = 0
                             for r in rounds_reversed:
-                                before_count = len(r.confirmed_supporters)
+                                if removed_count >= role_count:
+                                    break  # 지정된 개수만큼 제거 완료
+                                
                                 # 해당 사용자가 이 차수의 서포터인지 확인
                                 is_supporter = any(s[0] == user_name for s in r.confirmed_supporters)
                                 if is_supporter:
+                                    before_count = len(r.confirmed_supporters)
                                     r.confirmed_supporters = [s for s in r.confirmed_supporters if s[0] != user_name]
                                     changes_applied.append(f"{user_name}님이 {r.name}의 서포터에서 제거됨")
-                                    break  # 하나만 제거하고 종료
+                                    removed_count += 1
                         
                         elif role.lower() in ["딜러", "딜", "dps", "dealer", "damage"]:
+                            removed_count = 0
                             for r in rounds_reversed:
-                                before_count = len(r.confirmed_dealers)
+                                if removed_count >= role_count:
+                                    break  # 지정된 개수만큼 제거 완료
+                                
                                 # 해당 사용자가 이 차수의 딜러인지 확인
                                 is_dealer = any(d[0] == user_name for d in r.confirmed_dealers)
                                 if is_dealer:
+                                    before_count = len(r.confirmed_dealers)
                                     r.confirmed_dealers = [d for d in r.confirmed_dealers if d[0] != user_name]
                                     changes_applied.append(f"{user_name}님이 {r.name}의 딜러에서 제거됨")
-                                    break  # 하나만 제거하고 종료
+                                    removed_count += 1
                         
                         # 역할이 지정되지 않은 경우, 모든 차수에서 모든 역할 제거
                         elif not role:

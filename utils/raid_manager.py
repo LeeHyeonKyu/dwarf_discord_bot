@@ -301,18 +301,6 @@ async def create_raid_threads(client, channel_id, active_only=True, is_test=Fals
                 message_content += f"🔹 필요 레벨: {min_level} 이상\n"
             message_content += f"🔹 모집 인원: {members_count}명\n\n"
             
-            # 레이드 구성 템플릿 추가 (1차만 생성)
-            message_content += "## 1차\n"
-            message_content += "- when: \n"
-            message_content += "- who: \n"
-            if members_count == 4:
-                message_content += "  - 서포터(0/1): \n"
-                message_content += "  - 딜러(0/3): \n"
-            else:  # 8인 레이드
-                message_content += "  - 서포터(0/2): \n"
-                message_content += "  - 딜러(0/6): \n"
-            message_content += "- note: \n"
-            
             try:
                 # 메시지 전송
                 raid_message = await channel.send(message_content)

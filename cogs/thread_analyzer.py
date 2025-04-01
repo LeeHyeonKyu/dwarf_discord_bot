@@ -396,7 +396,25 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
     {
       "type": "remove_participant",
       "user": "유저1",
-      "role": "딜러"
+      "role": "1딜"
+    }
+  ]
+}
+```
+
+### 상황 7: 특정 개수 제거
+```
+유저1: !제거 2딜
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "remove_participant",
+      "user": "유저1",
+      "role": "2딜"
     }
   ]
 }
