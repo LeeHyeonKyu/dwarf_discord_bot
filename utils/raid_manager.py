@@ -137,6 +137,12 @@ async def create_raid_threads(client, channel_id, active_only=True, is_test=Fals
         member_status = "활성화된 " if active_only else ""
         print(f"{member_status}멤버 수: {len(member_characters)}명")
         
+        # 테스트 모드인 경우 첫 번째 레이드만 처리
+        if is_test:
+            print("테스트 모드: 첫 번째 레이드만 스레드를 생성합니다.")
+            if raids:
+                raids = [raids[0]]
+        
         # 각 레이드별로 메시지 및 스레드 생성
         for raid in raids:
             raid_name = raid.get('name', 'Unknown')
