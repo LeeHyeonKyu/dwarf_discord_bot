@@ -277,6 +277,7 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
 ```
 유저1: 1차 일정 목요일 9시로 변경해주세요
 유저2: 1차 참가 취소할게요
+유저3: 1차 딜러만 취소할게요 (서포터로는 계속 참가)
 ```
 
 응답:
@@ -291,8 +292,13 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
     {
       "type": "remove_participant",
       "user": "유저2",
+      "round": "1차"
+    },
+    {
+      "type": "remove_participant",
+      "user": "유저3",
       "round": "1차",
-      "role": "서포터"
+      "role": "딜러"
     }
   ]
 }
@@ -378,6 +384,24 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
 }
 ```
 
+### 상황 6: 특정 차수 미지정 제거
+```
+유저1: 1딜 취소할게요
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "remove_participant",
+      "user": "유저1",
+      "role": "딜러"
+    }
+  ]
+}
+```
+
 - 중요: 변경 사항만 반환하고, 기존 정보는 반환하지 마세요.
 - 사용자명은 디스코드 멘션 형식(<@사용자ID>)이 아닌 원래 사용자명을 그대로 사용하세요.
 - 사용자 ID 정보: {json.dumps(user_ids, ensure_ascii=False)}
@@ -444,7 +468,8 @@ class ThreadAnalyzer(commands.Cog, RaidSchedulerBase):
                     elif change.get("type") == "remove_participant":
                         formatted_change.update({
                             "user_name": change.get("user", ""),
-                            "round_name": change.get("round", "")
+                            "round_name": change.get("round", ""),
+                            "role": change.get("role", "")  # 역할 정보도 포함
                         })
                     elif change.get("type") == "update_schedule":
                         formatted_change.update({
