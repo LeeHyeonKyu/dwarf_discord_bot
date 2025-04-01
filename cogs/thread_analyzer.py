@@ -7,8 +7,43 @@ import aiohttp
 import datetime
 import hashlib
 import pathlib
-from typing import Optional
+from typing import Optional, List, Dict, Set, Tuple
+from dataclasses import dataclass, field
 import re
+
+@dataclass
+class Character:
+    name: str
+    role: str  # "서포터" 또는 "딜러"
+    
+@dataclass
+class UserPreference:
+    user_id: str
+    user_name: str
+    characters: List[Character] = field(default_factory=list)
+    # 특정 차수에 특정 캐릭터로 참가하고 싶은 명시적 요청
+    explicit_requests: Dict[str, List[Character]] = field(default_factory=dict)  # round_name -> 캐릭터 목록
+    # 우선순위: 명시적 요청이 없는 경우 사용
+    priority: int = 0  # 캐릭터 수에 기반한 우선순위
+    
+@dataclass
+class RoundInfo:
+    name: str
+    when: str = ""
+    note: str = ""
+    supporter_max: int = 2
+    dealer_max: int = 6
+    # 참가가 확정된 사용자들
+    confirmed_supporters: List[Tuple[str, str]] = field(default_factory=list)  # (user_name, character_name)
+    confirmed_dealers: List[Tuple[str, str]] = field(default_factory=list)  # (user_name, character_name)
+    
+@dataclass
+class RaidData:
+    header: str
+    info: List[str] = field(default_factory=list)
+    rounds: List[RoundInfo] = field(default_factory=list)
+    # 사용자 선호도 및 참가 요청
+    user_preferences: Dict[str, UserPreference] = field(default_factory=dict)  # user_name -> UserPreference
 
 class ThreadAnalyzer(commands.Cog):
     """스레드 메시지를 분석하여 레이드 정보를 업데이트하는 Cog"""
@@ -170,32 +205,178 @@ class ThreadAnalyzer(commands.Cog):
 - 서포터가 이미 최대 인원인 경우, 새로운 차수(예: 다음 차수)를 생성하여 초과된 서포터를 배정하세요
 
 ## 분석 및 명령어 반환 요청:
-스레드 대화 내용을 분석하여 다음 명령어 형식으로 정보를 반환해주세요:
+스레드 대화 내용을 분석하여 다음과 같은 JSON 형식으로 변경 사항을 반환해주세요:
 
 ```json
 {
-  "사용자명1": [
-    "add(1차, 딜러)",  // 1차에 딜러로 참가
-    "add(2차, 서포터)" // 2차에 서포터로 참가
-  ],
-  "사용자명2": [
-    "edit(1차, when: 7/5(수) 21:00)"  // 1차 일정 수정
-  ],
-  "일정": [
-    "add(2차, when: 7/6(목) 21:00)"  // 2차 일정 추가
-  ],
-  "notes": [
-    "add(1차, note: 숙련자만)"  // 1차 노트 추가/수정
+  "changes": [
+    {
+      "type": "add_participant", 
+      "user": "사용자명",
+      "round": "1차",
+      "role": "딜러"
+    },
+    {
+      "type": "remove_participant",
+      "user": "사용자명",
+      "round": "1차",
+      "role": "서포터"
+    },
+    {
+      "type": "update_schedule",
+      "round": "1차",
+      "when": "7/5(수) 21:00"
+    },
+    {
+      "type": "add_round",
+      "round": "2차",
+      "when": "7/6(목) 21:00"
+    },
+    {
+      "type": "update_note",
+      "round": "1차",
+      "note": "숙련자만 참여 가능"
+    }
   ]
 }
 ```
 
+## 오늘 대화에서의 예시 상황과 응답:
+
+### 상황 1: 새 참가자 추가
+```
+유저1: 1차에 딜러로 참가할게요
+유저2: 서폿으로 참가합니다
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "add_participant",
+      "user": "유저1",
+      "round": "1차",
+      "role": "딜러"
+    },
+    {
+      "type": "add_participant",
+      "user": "유저2",
+      "round": "1차",
+      "role": "서포터"
+    }
+  ]
+}
+```
+
+### 상황 2: 일정 변경 및 참가자 취소
+```
+유저1: 1차 일정 목요일 9시로 변경해주세요
+유저2: 1차 참가 취소할게요
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "update_schedule",
+      "round": "1차",
+      "when": "목요일 21:00"
+    },
+    {
+      "type": "remove_participant",
+      "user": "유저2",
+      "round": "1차",
+      "role": "서포터"
+    }
+  ]
+}
+```
+
+### 상황 3: 새 차수 추가 및 메모 업데이트
+```
+유저1: 2차 일정 금요일 9시에 추가해주세요
+유저2: 1차 메모에 "숙련자만" 추가해주세요
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "add_round",
+      "round": "2차",
+      "when": "금요일 21:00"
+    },
+    {
+      "type": "update_note",
+      "round": "1차",
+      "note": "숙련자만"
+    }
+  ]
+}
+```
+
+### 상황 4: 다수의 차수에 참가
+```
+유저1: 1차, 2차 모두 딜러로 참가합니다
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "add_participant",
+      "user": "유저1",
+      "round": "1차",
+      "role": "딜러"
+    },
+    {
+      "type": "add_participant",
+      "user": "유저1",
+      "round": "2차",
+      "role": "딜러"
+    }
+  ]
+}
+```
+
+### 상황 5: 역할 지정 참가
+```
+유저1: 폿1딜2로 참가할게요
+```
+
+응답:
+```json
+{
+  "changes": [
+    {
+      "type": "add_participant",
+      "user": "유저1",
+      "round": "1차",
+      "role": "서포터"
+    },
+    {
+      "type": "add_participant",
+      "user": "유저1",
+      "round": "1차",
+      "role": "딜러"
+    },
+    {
+      "type": "add_participant",
+      "user": "유저1",
+      "round": "2차",
+      "role": "딜러"
+    }
+  ]
+}
+```
+
+- 중요: 변경 사항만 반환하고, 기존 정보는 반환하지 마세요.
 - 사용자명은 디스코드 멘션 형식(<@사용자ID>)이 아닌 원래 사용자명을 그대로 사용하세요.
 - 사용자 ID 정보: {json.dumps(user_ids, ensure_ascii=False)}
-- "일정" 키는 when 정보를 수정할 때 사용합니다.
-- "notes" 키는 참고사항을 추가/수정할 때 사용합니다.
-- 명령어는 add, edit, remove 세 가지가 있습니다.
-- 변경이 필요한 사항만 간결하게 명령어로 표현하세요.
 - 오직 JSON 형식으로만 응답하세요.
 """
 
@@ -208,7 +389,7 @@ class ThreadAnalyzer(commands.Cog):
             payload = {
                 "model": "gpt-4o-mini",
                 "messages": [
-                    {"role": "system", "content": "당신은 디스코드 대화에서 정보를 추출하여 JSON 형식으로 명령어를 반환하는 도우미입니다."},
+                    {"role": "system", "content": "당신은 디스코드 대화에서 레이드 참가 정보와 일정 변경 등의 요청을 추출하여 JSON 형식으로 명령어를 반환하는 도우미입니다."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.0,
@@ -228,15 +409,18 @@ class ThreadAnalyzer(commands.Cog):
                         
                         try:
                             # JSON 파싱 시도
-                            commands = json.loads(content)
+                            changes_data = json.loads(content)
                             result = {
-                                "commands": commands,
+                                "changes_data": changes_data,
                                 "original_content": message_content
                             }
                             
                             # 결과를 캐시에 저장
                             self._save_to_cache(cache_key, result)
-                            print(f"명령어 응답을 성공적으로 파싱했습니다: {len(commands)} 사용자/항목")
+                            
+                            # 변경 항목 수 계산
+                            changes_count = len(changes_data.get("changes", []))
+                            print(f"변경 사항을 성공적으로 파싱했습니다: {changes_count}개 항목")
                             
                             return result
                         except json.JSONDecodeError as e:
@@ -313,193 +497,179 @@ class ThreadAnalyzer(commands.Cog):
         # 시작 시 1분 대기 (봇 초기화 후 안정화 시간)
         await asyncio.sleep(60)
         
+    async def parse_message_to_data(self, message_content):
+        """메시지 내용을 파싱하여 데이터 클래스 기반의 구조로 변환"""
+        lines = message_content.split('\n')
+        
+        # 기본 데이터 구조 초기화
+        raid_data = RaidData(header="")
+        
+        # 현재 파싱 상태 추적
+        current_section = "header"
+        current_round = None
+        
+        for line in lines:
+            # 헤더 섹션 (레이드 제목과 설명)
+            if line.startswith('# '):
+                raid_data.header = line[2:].strip()
+                current_section = "info"
+                
+            # 기본 정보 섹션 (레벨, 인원 등)
+            elif line.startswith('🔹 ') and current_section == "info":
+                raid_data.info.append(line)
+                
+            # 차수 섹션
+            elif line.startswith('## ') and '차' in line:
+                round_name = line[3:].strip()
+                current_round = RoundInfo(name=round_name)
+                raid_data.rounds.append(current_round)
+                current_section = "round"
+                
+            # 차수 내 세부 정보
+            elif current_section == "round" and current_round is not None:
+                if line.startswith('- when:'):
+                    current_round.when = line[8:].strip()
+                elif line.startswith('- note:'):
+                    current_round.note = line[8:].strip()
+                elif '서포터(' in line:
+                    parts = line.split(':')
+                    if len(parts) > 1:
+                        # 서포터 인원 수 파싱
+                        count_match = re.search(r'서포터\((\d+)/(\d+)\)', parts[0])
+                        if count_match:
+                            current_round.supporter_max = int(count_match.group(2))
+                        
+                        # 서포터 명단 파싱
+                        supporters_text = parts[1].strip()
+                        if supporters_text:
+                            supporters = [s.strip() for s in supporters_text.split(',')]
+                            # 서포터 목록 저장 (캐릭터 이름만, 사용자 이름은 현재 없음)
+                            for supporter in supporters:
+                                # 현재 파싱에서는 사용자와 캐릭터 구분이 어려우므로 임시로 같게 설정
+                                current_round.confirmed_supporters.append((supporter, supporter))
+                                
+                                # 사용자 선호도가 없으면 생성
+                                if supporter not in raid_data.user_preferences:
+                                    raid_data.user_preferences[supporter] = UserPreference(
+                                        user_id="", user_name=supporter
+                                    )
+                                
+                                # 캐릭터 정보 추가
+                                character = Character(name=supporter, role="서포터")
+                                if character not in raid_data.user_preferences[supporter].characters:
+                                    raid_data.user_preferences[supporter].characters.append(character)
+                                
+                                # 명시적 요청 추가
+                                if current_round.name not in raid_data.user_preferences[supporter].explicit_requests:
+                                    raid_data.user_preferences[supporter].explicit_requests[current_round.name] = []
+                                raid_data.user_preferences[supporter].explicit_requests[current_round.name].append(character)
+                                
+                elif '딜러(' in line:
+                    parts = line.split(':')
+                    if len(parts) > 1:
+                        # 딜러 인원 수 파싱
+                        count_match = re.search(r'딜러\((\d+)/(\d+)\)', parts[0])
+                        if count_match:
+                            current_round.dealer_max = int(count_match.group(2))
+                        
+                        # 딜러 명단 파싱
+                        dealers_text = parts[1].strip()
+                        if dealers_text:
+                            dealers = [d.strip() for d in dealers_text.split(',')]
+                            # 딜러 목록 저장
+                            for dealer in dealers:
+                                current_round.confirmed_dealers.append((dealer, dealer))
+                                
+                                # 사용자 선호도가 없으면 생성
+                                if dealer not in raid_data.user_preferences:
+                                    raid_data.user_preferences[dealer] = UserPreference(
+                                        user_id="", user_name=dealer
+                                    )
+                                
+                                # 캐릭터 정보 추가
+                                character = Character(name=dealer, role="딜러")
+                                if character not in raid_data.user_preferences[dealer].characters:
+                                    raid_data.user_preferences[dealer].characters.append(character)
+                                
+                                # 명시적 요청 추가
+                                if current_round.name not in raid_data.user_preferences[dealer].explicit_requests:
+                                    raid_data.user_preferences[dealer].explicit_requests[current_round.name] = []
+                                raid_data.user_preferences[dealer].explicit_requests[current_round.name].append(character)
+        
+        # 우선순위 계산 (캐릭터 수 기반)
+        for user_name, preference in raid_data.user_preferences.items():
+            preference.priority = len(preference.characters)
+        
+        return raid_data
+
+    async def format_data_to_message(self, raid_data):
+        """데이터 클래스 기반 구조를 메시지 내용으로 변환"""
+        lines = []
+        
+        # 헤더 추가
+        lines.append(f"# {raid_data.header}")
+        
+        # 기본 정보 추가
+        for info in raid_data.info:
+            lines.append(info)
+        
+        # 빈 줄 추가
+        lines.append("")
+        
+        # 각 차수 정보 추가
+        for round_info in raid_data.rounds:
+            # 차수 이름
+            lines.append(f"## {round_info.name}")
+            
+            # 일정 정보
+            lines.append(f"- when: {round_info.when}")
+            
+            # 참가자 정보
+            lines.append("- who: ")
+            
+            # 서포터 정보
+            supporter_count = len(round_info.confirmed_supporters)
+            supporter_line = f"  - 서포터({supporter_count}/{round_info.supporter_max}): "
+            if round_info.confirmed_supporters:
+                supporter_line += ", ".join(supporter for supporter, _ in round_info.confirmed_supporters)
+            lines.append(supporter_line)
+            
+            # 딜러 정보
+            dealer_count = len(round_info.confirmed_dealers)
+            dealer_line = f"  - 딜러({dealer_count}/{round_info.dealer_max}): "
+            if round_info.confirmed_dealers:
+                dealer_line += ", ".join(dealer for dealer, _ in round_info.confirmed_dealers)
+            lines.append(dealer_line)
+            
+            # 메모 정보
+            lines.append(f"- note: {round_info.note}")
+            
+            # 차수 사이 빈 줄 추가 (마지막 차수가 아닌 경우)
+            if round_info != raid_data.rounds[-1]:
+                lines.append("")
+        
+        # 전체 메시지로 합치기
+        return '\n'.join(lines)
+
     async def process_commands_and_update_message(self, message, commands, thread_name="", ctx=None):
-        """JSON 명령어를 처리하여 메시지를 업데이트하는 함수"""
+        """JSON 명령어를 처리하여 메시지를 업데이트하는 함수 (데이터 클래스 기반)"""
         try:
-            # 메시지 내용을 줄 단위로 분리하여 처리
-            lines = message.content.split('\n')
+            # 1. 메시지 내용을 데이터 구조로 파싱
+            raid_data = await self.parse_message_to_data(message.content)
             
-            # 차수 인덱스 찾기 (ex: "## 1차", "## 2차" 등)
-            round_indices = {}
-            for i, line in enumerate(lines):
-                if line.startswith('## ') and '차' in line:
-                    round_name = line.replace('## ', '').strip()
-                    round_indices[round_name] = i
-            
-            changes_made = False
-            changes_description = []
-            
-            # 명령어 처리
-            for user, user_commands in commands.items():
-                if user == "일정":
-                    # 일정 관련 명령
-                    for cmd in user_commands:
-                        if cmd.startswith('add('):
-                            # 새 차수 일정 추가
-                            match = re.search(r'add\(([^,]+),\s*when:\s*([^)]+)\)', cmd)
-                            if match:
-                                round_name = match.group(1)
-                                when_value = match.group(2)
-                                
-                                # 이미 해당 차수가 있는지 확인
-                                if round_name in round_indices:
-                                    # when 값 업데이트
-                                    round_index = round_indices[round_name]
-                                    for j in range(round_index + 1, len(lines)):
-                                        if lines[j].startswith('- when:'):
-                                            lines[j] = f'- when: {when_value}'
-                                            changes_made = True
-                                            changes_description.append(f"{round_name} 일정 설정: {when_value}")
-                                            break
-                                else:
-                                    # 새 차수 추가
-                                    last_round_index = max(round_indices.values()) if round_indices else 0
-                                    new_round_section = [
-                                        f"## {round_name}",
-                                        f"- when: {when_value}",
-                                        "- who: ",
-                                        "  - 서포터(0/2): ",
-                                        "  - 딜러(0/6): ",
-                                        "- note: "
-                                    ]
-                                    lines = lines[:last_round_index + 7] + new_round_section + lines[last_round_index + 7:]
-                                    round_indices[round_name] = last_round_index + 7
-                                    changes_made = True
-                                    changes_description.append(f"{round_name} 추가: {when_value}")
-                        
-                        elif cmd.startswith('edit('):
-                            # 기존 차수 일정 수정
-                            match = re.search(r'edit\(([^,]+),\s*when:\s*([^)]+)\)', cmd)
-                            if match:
-                                round_name = match.group(1)
-                                when_value = match.group(2)
-                                
-                                if round_name in round_indices:
-                                    round_index = round_indices[round_name]
-                                    for j in range(round_index + 1, len(lines)):
-                                        if lines[j].startswith('- when:'):
-                                            lines[j] = f'- when: {when_value}'
-                                            changes_made = True
-                                            changes_description.append(f"{round_name} 일정 수정: {when_value}")
-                                            break
-                
-                elif user == "notes":
-                    # 메모 관련 명령
-                    for cmd in user_commands:
-                        if cmd.startswith('add(') or cmd.startswith('edit('):
-                            # 메모 추가/수정
-                            match = re.search(r'(?:add|edit)\(([^,]+),\s*note:\s*([^)]+)\)', cmd)
-                            if match:
-                                round_name = match.group(1)
-                                note_value = match.group(2)
-                                
-                                if round_name in round_indices:
-                                    round_index = round_indices[round_name]
-                                    for j in range(round_index + 1, len(lines)):
-                                        if lines[j].startswith('- note:'):
-                                            lines[j] = f'- note: {note_value}'
-                                            changes_made = True
-                                            changes_description.append(f"{round_name} 메모 추가/수정: {note_value}")
-                                            break
-                
-                else:
-                    # 사용자 참가 관련 명령
-                    for cmd in user_commands:
-                        if cmd.startswith('add('):
-                            # 참가자 추가
-                            match = re.search(r'add\(([^,]+),\s*([^)]+)\)', cmd)
-                            if match:
-                                round_name = match.group(1)
-                                role = match.group(2)
-                                
-                                if round_name in round_indices:
-                                    round_index = round_indices[round_name]
-                                    
-                                    # 역할에 따라 적절한 라인 찾기
-                                    role_type = "서포터" if role.lower() in ["서포터", "폿", "서폿"] else "딜러"
-                                    
-                                    for j in range(round_index + 1, len(lines)):
-                                        if f"{role_type}(" in lines[j]:
-                                            # 현재 인원 수 파싱
-                                            current_line = lines[j]
-                                            count_pattern = rf"{role_type}\((\d+)/(\d+)\):"
-                                            count_match = re.search(count_pattern, current_line)
-                                            
-                                            if count_match:
-                                                current_count = int(count_match.group(1))
-                                                max_count = int(count_match.group(2))
-                                                
-                                                # 인원 수 업데이트
-                                                new_count = current_count + 1
-                                                if new_count <= max_count:
-                                                    # 라인 업데이트: 새 참가자 추가
-                                                    if ": " in current_line:
-                                                        if current_line.endswith(': '):
-                                                            # 첫 번째 참가자
-                                                            lines[j] = f"{current_line}{user}"
-                                                        else:
-                                                            # 기존 참가자에 추가
-                                                            lines[j] = f"{current_line}, {user}"
-                                                    
-                                                    # 인원 수 텍스트 업데이트
-                                                    lines[j] = lines[j].replace(f"{role_type}({current_count}/{max_count}):", f"{role_type}({new_count}/{max_count}):")
-                                                    
-                                                    changes_made = True
-                                                    changes_description.append(f"{user} {round_name}에 {role_type}로 참가")
-                                            break
-                        
-                        elif cmd.startswith('remove('):
-                            # 참가자 제거
-                            match = re.search(r'remove\(([^,]+),\s*([^)]+)\)', cmd)
-                            if match:
-                                round_name = match.group(1)
-                                role = match.group(2)
-                                
-                                if round_name in round_indices:
-                                    round_index = round_indices[round_name]
-                                    
-                                    # 역할에 따라 적절한 라인 찾기
-                                    role_type = "서포터" if role.lower() in ["서포터", "폿", "서폿"] else "딜러"
-                                    
-                                    for j in range(round_index + 1, len(lines)):
-                                        if f"{role_type}(" in lines[j] and user in lines[j]:
-                                            # 현재 인원 수 파싱
-                                            current_line = lines[j]
-                                            count_pattern = rf"{role_type}\((\d+)/(\d+)\):"
-                                            count_match = re.search(count_pattern, current_line)
-                                            
-                                            if count_match:
-                                                current_count = int(count_match.group(1))
-                                                max_count = int(count_match.group(2))
-                                                
-                                                # 인원 수 업데이트
-                                                new_count = max(0, current_count - 1)
-                                                
-                                                # 참가자 제거
-                                                if f", {user}" in current_line:
-                                                    current_line = current_line.replace(f", {user}", "")
-                                                elif f"{user}, " in current_line:
-                                                    current_line = current_line.replace(f"{user}, ", "")
-                                                else:
-                                                    current_line = current_line.replace(user, "")
-                                                
-                                                # 인원 수 텍스트 업데이트
-                                                current_line = current_line.replace(f"{role_type}({current_count}/{max_count}):", f"{role_type}({new_count}/{max_count}):")
-                                                
-                                                lines[j] = current_line
-                                                changes_made = True
-                                                changes_description.append(f"{user} {round_name}에서 {role_type} 참가 취소")
-                                            break
+            # 2. 명령어를 데이터 구조에 적용
+            changes_made, changes_description = await self.apply_changes_to_data(raid_data, commands)
             
             if changes_made:
-                # 업데이트된 내용으로 메시지 수정
-                updated_content = '\n'.join(lines)
+                # 3. 업데이트된 데이터 구조를 기반으로 새 메시지 내용 생성
+                updated_content = await self.format_data_to_message(raid_data)
                 
                 # 메시지 길이 제한 확인
                 if len(updated_content) > 2000:
                     print(f"경고: 메시지가 Discord 길이 제한(2000자)을 초과합니다. 길이: {len(updated_content)}자")
                     updated_content = updated_content[:1997] + "..."
                 
+                # 메시지 내용 업데이트
                 await message.edit(content=updated_content)
                 
                 # 결과 반환
@@ -526,6 +696,182 @@ class ThreadAnalyzer(commands.Cog):
             if ctx:
                 await ctx.send(error_message)
             return False, [error_message]
+
+    async def apply_changes_to_data(self, raid_data, changes_data):
+        """새로운 형식의 변경 사항을 데이터 클래스 기반 구조에 적용하여 업데이트"""
+        changes_made = False
+        changes_description = []
+        
+        # 라운드 인덱스 매핑 만들기 (이름 -> 인덱스)
+        round_indices = {round_info.name: i for i, round_info in enumerate(raid_data.rounds)}
+        
+        # changes 배열 가져오기
+        changes = changes_data.get("changes", [])
+        
+        # 각 변경 사항 처리
+        for change in changes:
+            change_type = change.get("type")
+            
+            if change_type == "add_participant":
+                # 참가자 추가
+                user = change.get("user")
+                round_name = change.get("round")
+                role = change.get("role")
+                
+                if round_name in round_indices:
+                    round_idx = round_indices[round_name]
+                    round_info = raid_data.rounds[round_idx]
+                    
+                    # 역할에 따라 적절한 리스트와 설정 선택
+                    if role.lower() in ["서포터", "폿", "서폿"]:
+                        role_type = "confirmed_supporters"
+                        max_count = round_info.supporter_max
+                        role_display = "서포터"
+                        role_value = "서포터"
+                    else:
+                        role_type = "confirmed_dealers"
+                        max_count = round_info.dealer_max
+                        role_display = "딜러"
+                        role_value = "딜러"
+                    
+                    # 해당 유형의 참가자 목록
+                    participants = getattr(round_info, role_type)
+                    
+                    # 이미 참가하고 있는지 확인
+                    already_participating = any(p[0] == user for p in participants)
+                    
+                    # 최대 인원 확인
+                    if not already_participating and len(participants) < max_count:
+                        # 사용자 선호도가 없으면 생성
+                        if user not in raid_data.user_preferences:
+                            raid_data.user_preferences[user] = UserPreference(user_id="", user_name=user)
+                        
+                        # 캐릭터 생성 및 추가
+                        character = Character(name=user, role=role_value)
+                        
+                        # 사용자 선호도에 캐릭터 추가
+                        if not any(c.name == character.name and c.role == character.role
+                                 for c in raid_data.user_preferences[user].characters):
+                            raid_data.user_preferences[user].characters.append(character)
+                        
+                        # 명시적 요청 추가
+                        if round_name not in raid_data.user_preferences[user].explicit_requests:
+                            raid_data.user_preferences[user].explicit_requests[round_name] = []
+                        
+                        if not any(c.name == character.name and c.role == character.role
+                                 for c in raid_data.user_preferences[user].explicit_requests[round_name]):
+                            raid_data.user_preferences[user].explicit_requests[round_name].append(character)
+                        
+                        # 참가자 목록에 추가
+                        participants.append((user, character.name))
+                        
+                        # 우선순위 업데이트
+                        raid_data.user_preferences[user].priority = len(raid_data.user_preferences[user].characters)
+                        
+                        changes_made = True
+                        changes_description.append(f"{user} {round_name}에 {role_display}로 참가")
+            
+            elif change_type == "remove_participant":
+                # 참가자 제거
+                user = change.get("user")
+                round_name = change.get("round")
+                role = change.get("role")
+                
+                if round_name in round_indices:
+                    round_idx = round_indices[round_name]
+                    round_info = raid_data.rounds[round_idx]
+                    
+                    # 역할에 따라 적절한 리스트 선택
+                    if role.lower() in ["서포터", "폿", "서폿"]:
+                        role_type = "confirmed_supporters" 
+                        role_display = "서포터"
+                    else:
+                        role_type = "confirmed_dealers"
+                        role_display = "딜러"
+                    
+                    # 해당 유형의 참가자 목록
+                    participants = getattr(round_info, role_type)
+                    
+                    # 참가자 제거
+                    removed = False
+                    for i, (participant, char_name) in enumerate(participants):
+                        if participant == user:
+                            participants.pop(i)
+                            removed = True
+                            break
+                    
+                    if removed:
+                        # 사용자 선호도가 있는지 확인
+                        if user in raid_data.user_preferences:
+                            # 명시적 요청에서도 제거
+                            if round_name in raid_data.user_preferences[user].explicit_requests:
+                                # 해당 역할의 캐릭터만 제거
+                                raid_data.user_preferences[user].explicit_requests[round_name] = [
+                                    char for char in raid_data.user_preferences[user].explicit_requests[round_name]
+                                    if char.role != role_display
+                                ]
+                        
+                        changes_made = True
+                        changes_description.append(f"{user} {round_name}에서 {role_display} 참가 취소")
+            
+            elif change_type == "update_schedule":
+                # 일정 수정
+                round_name = change.get("round")
+                when_value = change.get("when")
+                
+                if round_name in round_indices:
+                    raid_data.rounds[round_indices[round_name]].when = when_value
+                    changes_made = True
+                    changes_description.append(f"{round_name} 일정 수정: {when_value}")
+            
+            elif change_type == "add_round":
+                # 새 차수 추가
+                round_name = change.get("round")
+                when_value = change.get("when")
+                
+                if round_name not in round_indices:
+                    # 새 차수 추가
+                    new_round = RoundInfo(
+                        name=round_name,
+                        when=when_value
+                    )
+                    
+                    # 차수 순서에 맞게 삽입
+                    def get_round_number(round_name):
+                        match = re.search(r'(\d+)차', round_name)
+                        if match:
+                            return int(match.group(1))
+                        return float('inf')
+                    
+                    target_num = get_round_number(round_name)
+                    inserted = False
+                    
+                    for i, r in enumerate(raid_data.rounds):
+                        if get_round_number(r.name) > target_num:
+                            raid_data.rounds.insert(i, new_round)
+                            inserted = True
+                            break
+                    
+                    if not inserted:
+                        raid_data.rounds.append(new_round)
+                    
+                    # 인덱스 업데이트
+                    round_indices = {r.name: i for i, r in enumerate(raid_data.rounds)}
+                    
+                    changes_made = True
+                    changes_description.append(f"{round_name} 추가: {when_value}")
+            
+            elif change_type == "update_note":
+                # 메모 수정
+                round_name = change.get("round")
+                note_value = change.get("note")
+                
+                if round_name in round_indices:
+                    raid_data.rounds[round_indices[round_name]].note = note_value
+                    changes_made = True
+                    changes_description.append(f"{round_name} 메모 추가/수정: {note_value}")
+        
+        return changes_made, changes_description
 
     async def auto_update_raid_message(self, thread):
         """(자동) 스레드 내 메시지 분석하여 원본 레이드 메시지 업데이트"""
@@ -583,14 +929,14 @@ class ThreadAnalyzer(commands.Cog):
                 return
             
             # 명령어 처리 및 메시지 업데이트
-            if "commands" in analysis_result:
+            if "changes_data" in analysis_result:
                 await self.process_commands_and_update_message(
                     message=message,
-                    commands=analysis_result["commands"],
+                    commands=analysis_result["changes_data"],
                     thread_name=thread.name
                 )
             else:
-                print(f"'{thread.name}' 스레드 메시지 분석 결과에 commands가 없습니다.")
+                print(f"'{thread.name}' 스레드 메시지 분석 결과에 changes_data가 없습니다.")
             
         except Exception as e:
             print(f"자동 메시지 업데이트 오류: {e}")
@@ -729,10 +1075,10 @@ class ThreadAnalyzer(commands.Cog):
                 return
             
             # 명령어 처리 및 메시지 업데이트
-            if "commands" in analysis_result:
+            if "changes_data" in analysis_result:
                 success, changes = await self.process_commands_and_update_message(
                     message=message,
-                    commands=analysis_result["commands"],
+                    commands=analysis_result["changes_data"],
                     thread_name=thread.name,
                     ctx=ctx
                 )
@@ -742,7 +1088,7 @@ class ThreadAnalyzer(commands.Cog):
                 else:
                     await progress_msg.edit(content=f"'{thread.name}' 스레드 메시지 업데이트 중 문제가 발생했습니다.")
             else:
-                await progress_msg.edit(content=f"'{thread.name}' 스레드 메시지 분석 결과에 commands가 없습니다.")
+                await progress_msg.edit(content=f"'{thread.name}' 스레드 메시지 분석 결과에 changes_data가 없습니다.")
             
         except Exception as e:
             print(f"레이드 메시지 업데이트 오류: {e}")
