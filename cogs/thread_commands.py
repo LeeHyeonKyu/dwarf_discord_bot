@@ -188,10 +188,14 @@ class ThreadCommands(commands.Cog):
                 ctx.author.mention
             )
             
-            # 오류 확인
-            if "error" in result:
-                logger.error(f"LLM 처리 오류: {result['error']}")
-                await processing_msg.edit(content=f"오류가 발생했습니다: {result['error']}")
+            # 유효성 검사 및 일정 자동 수정
+            result = self.validate_and_fix_schedule(result)
+            
+            # 상태 확인
+            if result.get("status") == "error":
+                error_msg = result.get("error", "알 수 없는 오류가 발생했습니다.")
+                logger.error(f"LLM 처리 오류: {error_msg}")
+                await processing_msg.edit(content=f"오류가 발생했습니다: {error_msg}")
                 return
                 
             # 6. 메시지 업데이트 또는 생성
@@ -211,11 +215,26 @@ class ThreadCommands(commands.Cog):
                         starter_message = await thread.send(updated_content)
                         logger.info(f"새 일정 메시지 생성 성공 - ID: {starter_message.id}")
                     
-                    # 명령어 성공 메시지
-                    if "changes" in result:
-                        await processing_msg.edit(content=f"일정이 {command_type}되었습니다: {result['changes']}")
+                    # 결과 요약 준비
+                    success_msg = f"일정이 {command_type}되었습니다"
+                    
+                    # 영향받은 차수 정보 추가
+                    if "affected_rounds" in result and result["affected_rounds"]:
+                        affected_rounds = ", ".join([str(r) for r in result["affected_rounds"]])
+                        success_msg += f" ({affected_rounds}차)"
+                    
+                    # 역할 정보 추가
+                    if "user_role" in result and result["user_role"]:
+                        success_msg += f" - {result['user_role']}"
+                    
+                    # 변경 내용 추가
+                    if "changes" in result and result["changes"]:
+                        success_msg += f": {result['changes']}"
                     else:
-                        await processing_msg.edit(content=f"일정이 {command_type}되었습니다!")
+                        success_msg += "!"
+                        
+                    await processing_msg.edit(content=success_msg)
+                    
                 except discord.Forbidden as e:
                     logger.error(f"메시지 수정 권한 없음: {e}")
                     await processing_msg.edit(content="메시지 수정 권한이 없습니다.")
@@ -393,6 +412,25 @@ class ThreadCommands(commands.Cog):
             target_round = int(round_match.group(1))
             logger.info(f"특정 차수 지정됨: {target_round}차")
         
+        # 출력 JSON 구조 정의
+        output_schema = {
+            "type": "object",
+            "required": ["updated_content", "changes", "status", "action"],
+            "properties": {
+                "updated_content": {"type": "string", "description": "업데이트된 메시지 내용"},
+                "changes": {"type": "string", "description": "변경된 내용 요약"},
+                "status": {"type": "string", "enum": ["success", "error"], "description": "성공/실패 여부"},
+                "action": {"type": "string", "enum": ["add", "remove", "update"], "description": "수행된 작업 유형"},
+                "error": {"type": "string", "description": "오류 메시지 (오류 발생시)"},
+                "affected_rounds": {
+                    "type": "array", 
+                    "items": {"type": "integer"}, 
+                    "description": "영향받은 차수 목록"
+                },
+                "user_role": {"type": "string", "description": "사용자 역할 (딜러/서포터)"}
+            }
+        }
+        
         # OpenAI에 보낼 프롬프트
         prompt = f"""
 {user_name}(ID: {user_id})님이 '{raid_name}' 레이드 스레드에서 일정 {command_type} 명령어를 사용했습니다.
@@ -488,11 +526,24 @@ class ThreadCommands(commands.Cog):
 원본 메시지의 형식을 최대한 유지하면서 일정 정보만 업데이트해주세요.
 각 차수마다 서포터(0/2), 딜러(0/6) 형식의 카운트를 반드시 정확하게 업데이트해야 합니다.
 
-JSON 형식으로 응답해 주세요:
+다음 JSON 형식으로 응답해주세요:
 ```json
 {{
   "updated_content": "업데이트된 메시지 내용",
-  "changes": "어떤 변경이 이루어졌는지 요약"
+  "changes": "어떤 변경이 이루어졌는지 요약",
+  "status": "success 또는 error",
+  "action": "{command_type}",
+  "affected_rounds": [영향받은 차수 번호들],
+  "user_role": "사용자 역할 (딜러 또는 서포터)"
+}}
+```
+
+만약 오류가 발생한 경우:
+```json
+{{
+  "status": "error",
+  "error": "오류 메시지",
+  "action": "{command_type}"
 }}
 ```
 """
@@ -519,20 +570,291 @@ JSON 형식으로 응답해 주세요:
                     response_data = await response.json()
                     
                     if "error" in response_data:
-                        return {"error": f"OpenAI API 오류: {response_data['error']}"}
+                        return {"error": f"OpenAI API 오류: {response_data['error']}", "status": "error", "action": command_type}
                     
                     if "choices" in response_data and len(response_data["choices"]) > 0:
                         content = response_data["choices"][0]["message"]["content"]
                         try:
                             result = json.loads(content)
+                            
+                            # 응답 검증: 필수 필드가 있는지 확인
+                            if "status" not in result:
+                                result["status"] = "success"  # 기본값
+                            
+                            if "action" not in result:
+                                result["action"] = command_type
+                                
+                            if result["status"] == "error" and "error" not in result:
+                                result["error"] = "알 수 없는 오류가 발생했습니다."
+                                
+                            if result["status"] == "success" and ("updated_content" not in result or "changes" not in result):
+                                result["status"] = "error"
+                                result["error"] = "LLM 응답에 필수 필드가 누락되었습니다."
+                            
                             self.save_to_cache(cache_key, result)
                             return result
                         except json.JSONDecodeError:
-                            return {"error": "LLM 응답을 JSON으로 파싱할 수 없습니다."}
+                            return {
+                                "status": "error", 
+                                "error": "LLM 응답을 JSON으로 파싱할 수 없습니다.", 
+                                "action": command_type
+                            }
                     else:
-                        return {"error": "LLM 응답에서 데이터를 찾을 수 없습니다."}
+                        return {
+                            "status": "error", 
+                            "error": "LLM 응답에서 데이터를 찾을 수 없습니다.", 
+                            "action": command_type
+                        }
         except Exception as e:
-            return {"error": f"OpenAI API 요청 중 오류: {e}"}
+            return {
+                "status": "error", 
+                "error": f"OpenAI API 요청 중 오류: {e}", 
+                "action": command_type
+            }
+
+    def validate_and_fix_schedule(self, result):
+        """
+        LLM 출력을 기반으로 일정 유효성 검사 및 수정
+        
+        Args:
+            result (dict): LLM의 응답 결과
+            
+        Returns:
+            dict: 유효성 검사 및 수정이 적용된 결과
+        """
+        # 에러 상태인 경우 그대로 반환
+        if result.get("status") == "error":
+            return result
+            
+        # updated_content가 없으면 처리 불가
+        if "updated_content" not in result:
+            result["status"] = "error"
+            result["error"] = "일정 내용이 없습니다."
+            return result
+            
+        # 원본 내용 복사 (디버깅 및 비교용)
+        original_content = result["updated_content"]
+        logger.info("일정 유효성 검사 및 수정 시작")
+        
+        # 메시지를 줄 단위로 분리
+        lines = original_content.split("\n")
+        
+        # 차수 정보 추출
+        rounds = []
+        current_round = None
+        
+        # 일정 메시지 파싱하여 차수 정보 추출
+        for i, line in enumerate(lines):
+            # 차수 시작 패턴 (숫자+차 패턴)
+            round_match = re.match(r'(\d+)차', line.strip())
+            if round_match:
+                # 새로운 차수 시작
+                if current_round:
+                    rounds.append(current_round)
+                
+                round_num = int(round_match.group(1))
+                current_round = {
+                    "number": round_num,
+                    "start_line": i,
+                    "supporters": [],
+                    "dealers": [],
+                    "when": "",
+                    "who": "",
+                    "note": "",
+                    "supporter_count": 0,
+                    "dealer_count": 0
+                }
+            elif current_round is not None:
+                # 현재 차수의 정보 파싱
+                if "서포터" in line and "(" in line and ")" in line:
+                    # 서포터 정보 (예: 서포터(1/2): 사용자1)
+                    support_line = line.split(":", 1)
+                    if len(support_line) > 1:
+                        count_match = re.search(r'\((\d+)/\d+\)', support_line[0])
+                        if count_match:
+                            current_round["supporter_count"] = int(count_match.group(1))
+                        
+                        if support_line[1].strip():
+                            supporters = [s.strip() for s in support_line[1].strip().split(",")]
+                            current_round["supporters"] = supporters
+                elif "딜러" in line and "(" in line and ")" in line:
+                    # 딜러 정보 (예: 딜러(3/6): 사용자1, 사용자2, 사용자3)
+                    dealer_line = line.split(":", 1)
+                    if len(dealer_line) > 1:
+                        count_match = re.search(r'\((\d+)/\d+\)', dealer_line[0])
+                        if count_match:
+                            current_round["dealer_count"] = int(count_match.group(1))
+                        
+                        if dealer_line[1].strip():
+                            dealers = [d.strip() for d in dealer_line[1].strip().split(",")]
+                            current_round["dealers"] = dealers
+                elif line.startswith("when:"):
+                    current_round["when"] = line[5:].strip()
+                elif line.startswith("who:"):
+                    current_round["who"] = line[4:].strip()
+                elif line.startswith("note:"):
+                    current_round["note"] = line[5:].strip()
+        
+        # 마지막 차수 추가
+        if current_round:
+            rounds.append(current_round)
+        
+        # 디버깅 정보
+        logger.info(f"총 {len(rounds)}개 차수 정보 추출 완료")
+        
+        if not rounds:
+            # 차수 정보가 없으면 원본 그대로 반환
+            logger.warning("차수 정보를 추출할 수 없습니다")
+            return result
+        
+        # 1. 각 차수별 인원 조정 (서포터 최대 2명, 딜러 최대 6명)
+        # 2. 중복 참가자 다음 차수로 이동
+        
+        # 사용자별 참여 차수 추적
+        user_rounds = {}
+        
+        # 초과 인원 보관
+        overflow_supporters = []
+        overflow_dealers = []
+        
+        # 차수별 수정
+        modified_rounds = []
+        
+        for r_idx, round_info in enumerate(rounds):
+            # 현재 차수의 참가자 목록
+            modified_supporters = []
+            modified_dealers = []
+            
+            # 서포터 처리 (기존 서포터 + 이전 차수 초과분)
+            for supporter in round_info["supporters"] + overflow_supporters:
+                if supporter and supporter not in user_rounds:
+                    # 새 참가자 추가
+                    modified_supporters.append(supporter)
+                    user_rounds[supporter] = round_info["number"]
+                elif supporter and user_rounds.get(supporter) != round_info["number"]:
+                    # 다른 차수에 이미 참가 중이면 추가
+                    modified_supporters.append(supporter)
+                    user_rounds[supporter] = round_info["number"]
+                else:
+                    # 같은 차수에 이미 참가 중이면 건너뜀
+                    logger.info(f"사용자 {supporter}는 이미 {round_info['number']}차에 참가 중. 건너뜀")
+            
+            # 서포터 정원 초과 확인
+            if len(modified_supporters) > 2:
+                overflow_supporters = modified_supporters[2:]
+                modified_supporters = modified_supporters[:2]
+                logger.info(f"{round_info['number']}차 서포터 정원 초과: {len(overflow_supporters)}명 다음 차수로 이동")
+            else:
+                overflow_supporters = []
+            
+            # 딜러 처리 (기존 딜러 + 이전 차수 초과분)
+            for dealer in round_info["dealers"] + overflow_dealers:
+                if dealer and dealer not in user_rounds:
+                    # 새 참가자 추가
+                    modified_dealers.append(dealer)
+                    user_rounds[dealer] = round_info["number"]
+                elif dealer and user_rounds.get(dealer) != round_info["number"]:
+                    # 다른 차수에 이미 참가 중이면 추가
+                    modified_dealers.append(dealer)
+                    user_rounds[dealer] = round_info["number"]
+                else:
+                    # 같은 차수에 이미 참가 중이면 건너뜀
+                    logger.info(f"사용자 {dealer}는 이미 {round_info['number']}차에 참가 중. 건너뜀")
+            
+            # 딜러 정원 초과 확인
+            if len(modified_dealers) > 6:
+                overflow_dealers = modified_dealers[6:]
+                modified_dealers = modified_dealers[:6]
+                logger.info(f"{round_info['number']}차 딜러 정원 초과: {len(overflow_dealers)}명 다음 차수로 이동")
+            else:
+                overflow_dealers = []
+            
+            # 수정된 차수 정보 저장
+            round_info["supporters"] = modified_supporters
+            round_info["dealers"] = modified_dealers
+            round_info["supporter_count"] = len(modified_supporters)
+            round_info["dealer_count"] = len(modified_dealers)
+            
+            # 차수에 참가자가 있는 경우만 추가
+            if modified_supporters or modified_dealers:
+                modified_rounds.append(round_info)
+        
+        # 초과 인원 처리 (마지막 차수 이후)
+        extra_round_number = modified_rounds[-1]["number"] + 1 if modified_rounds else 1
+        
+        while overflow_supporters or overflow_dealers:
+            extra_round = {
+                "number": extra_round_number,
+                "start_line": -1,  # 새 차수는 라인 정보 없음
+                "supporters": overflow_supporters[:2],  # 최대 2명
+                "dealers": overflow_dealers[:6],  # 최대 6명
+                "when": "",
+                "who": "",
+                "note": "",
+                "supporter_count": min(len(overflow_supporters), 2),
+                "dealer_count": min(len(overflow_dealers), 6)
+            }
+            
+            # 초과 인원 업데이트
+            overflow_supporters = overflow_supporters[2:] if len(overflow_supporters) > 2 else []
+            overflow_dealers = overflow_dealers[6:] if len(overflow_dealers) > 6 else []
+            
+            modified_rounds.append(extra_round)
+            extra_round_number += 1
+            
+            logger.info(f"초과 인원을 위한 {extra_round['number']}차 생성: 서포터 {extra_round['supporter_count']}명, 딜러 {extra_round['dealer_count']}명")
+        
+        # 라인별로 메시지 재구성
+        new_lines = []
+        
+        # 헤더 부분 (첫 번째 차수 시작 전)
+        if rounds[0]["start_line"] > 0:
+            new_lines.extend(lines[:rounds[0]["start_line"]])
+        
+        # 각 차수 정보 추가
+        for r_idx, round_info in enumerate(modified_rounds):
+            # 차수 번호
+            new_lines.append(f"{round_info['number']}차")
+            
+            # 기존 정보 유지
+            new_lines.append(f"when:{round_info['when']}")
+            new_lines.append(f"who:{round_info['who']}")
+            
+            # 서포터 정보
+            supporters_str = ", ".join(round_info["supporters"]) if round_info["supporters"] else ""
+            new_lines.append(f"서포터({round_info['supporter_count']}/2):{supporters_str}")
+            
+            # 딜러 정보
+            dealers_str = ", ".join(round_info["dealers"]) if round_info["dealers"] else ""
+            new_lines.append(f"딜러({round_info['dealer_count']}/6):{dealers_str}")
+            
+            # 메모
+            new_lines.append(f"note:{round_info['note']}")
+            
+            # 차수 구분선 (마지막 차수가 아닌 경우)
+            if r_idx < len(modified_rounds) - 1:
+                new_lines.append("")
+        
+        # 수정된 내용
+        updated_content = "\n".join(new_lines)
+        
+        # 변경사항 요약
+        changes_summary = f"일정 자동 조정: {len(rounds)}개 차수 → {len(modified_rounds)}개 차수"
+        
+        # 수정된 내용으로 결과 업데이트
+        if original_content != updated_content:
+            result["updated_content"] = updated_content
+            
+            # 원래 변경 내용에 자동 조정 정보 추가
+            original_changes = result.get("changes", "")
+            result["changes"] = f"{original_changes} [{changes_summary}]" if original_changes else changes_summary
+            
+            # 영향받은 차수 목록 업데이트
+            result["affected_rounds"] = [r["number"] for r in modified_rounds]
+            
+            logger.info(f"일정 자동 조정 완료: {changes_summary}")
+        
+        return result
 
 async def setup(bot):
     """확장 설정"""
