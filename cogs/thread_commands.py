@@ -12,6 +12,8 @@ import logging
 import sys
 from typing import List, Dict, Any, Optional
 
+from .raid_scheduler_common import RaidSchedulerBase, logger
+
 # 로깅 설정 변경: 표준 출력(stdout)으로 로그를 보내도록 설정
 logger = logging.getLogger('thread_commands')
 logger.setLevel(logging.INFO)
@@ -27,11 +29,12 @@ if not root_logger.handlers:
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
-class ThreadCommands(commands.Cog):
+class ThreadCommands(commands.Cog, RaidSchedulerBase):
     """스레드 내 일정 관리 명령어"""
     
     def __init__(self, bot):
         self.bot = bot
+        RaidSchedulerBase.__init__(self, bot)
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         
         # 캐시 디렉토리 설정
@@ -207,8 +210,14 @@ class ThreadCommands(commands.Cog):
                     if starter_message:
                         # 시작 메시지 또는 찾은 메시지 업데이트
                         logger.info(f"메시지 ID {starter_message.id} 업데이트 시도")
-                        await starter_message.edit(content=updated_content)
-                        logger.info("메시지 업데이트 성공")
+                        update_result = await self.update_message_safely(starter_message, updated_content)
+                        
+                        if update_result["status"] == "success":
+                            logger.info("메시지 업데이트 성공")
+                        else:
+                            logger.error(f"메시지 업데이트 실패: {update_result['reason']}")
+                            await processing_msg.edit(content=f"메시지 업데이트 실패: {update_result['reason']}")
+                            return
                     else:
                         # 시작 메시지가 없는 경우 새 메시지 생성
                         logger.info("새 일정 메시지 생성")
@@ -235,11 +244,8 @@ class ThreadCommands(commands.Cog):
                         
                     await processing_msg.edit(content=success_msg)
                     
-                except discord.Forbidden as e:
-                    logger.error(f"메시지 수정 권한 없음: {e}")
-                    await processing_msg.edit(content="메시지 수정 권한이 없습니다.")
-                except discord.HTTPException as e:
-                    logger.error(f"메시지 업데이트 HTTP 오류: {e}")
+                except Exception as e:
+                    logger.error(f"메시지 업데이트 중 오류: {e}")
                     await processing_msg.edit(content=f"메시지 업데이트 중 오류: {e}")
             else:
                 logger.warning("updated_content 필드가 없습니다")
@@ -249,17 +255,10 @@ class ThreadCommands(commands.Cog):
             logger.error(f"처리 중 예외 발생: {e}", exc_info=True)
             await processing_msg.edit(content=f"처리 중 오류가 발생했습니다: {e}")
     
-    def get_cache_key(self, thread_messages, message_content, command_type, user_name, user_id, command_message):
+    def get_cache_key(self, data):
         """캐시 키 생성"""
         # 입력 데이터를 문자열로 직렬화
-        data_str = json.dumps({
-            'thread_messages': thread_messages,
-            'message_content': message_content,
-            'command_type': command_type,
-            'user_name': user_name,
-            'user_id': user_id,
-            'command_message': command_message
-        }, sort_keys=True, ensure_ascii=False)
+        data_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
         
         # SHA-256 해시 생성
         hash_obj = hashlib.sha256(data_str.encode('utf-8'))
@@ -295,10 +294,17 @@ class ThreadCommands(commands.Cog):
     async def analyze_schedule_with_llm(self, thread_messages, message_content, command_type, user_name, user_id, command_params, user_mention):
         """OpenAI API를 사용하여 일정 정보 분석"""
         if not self.openai_api_key:
-            return {"error": "OpenAI API 키가 설정되지 않았습니다."}
+            return {"status": "error", "error": "OpenAI API 키가 설정되지 않았습니다."}
         
         # 캐시 키 생성
-        cache_key = self.get_cache_key(thread_messages, message_content, command_type, user_name, user_id, command_params)
+        cache_key = self.get_cache_key({
+            'thread_messages': thread_messages,
+            'message_content': message_content,
+            'command_type': command_type,
+            'user_name': user_name,
+            'user_id': user_id,
+            'command_message': command_params
+        })
         
         # 캐시 확인
         cached_result = self.get_cached_result(cache_key)
@@ -347,7 +353,6 @@ class ThreadCommands(commands.Cog):
         # 처리 모드에 따라 필요한 정보 준비
         if is_round_specification:
             # 차수 지정 모드: 각 차수별 역할 매핑 준비
-            # round_role_map = [] -- 위로 이동됨
             
             # 딜러 차수 매핑
             for match in dps_matches:
@@ -411,25 +416,6 @@ class ThreadCommands(commands.Cog):
         if round_match:
             target_round = int(round_match.group(1))
             logger.info(f"특정 차수 지정됨: {target_round}차")
-        
-        # 출력 JSON 구조 정의
-        output_schema = {
-            "type": "object",
-            "required": ["updated_content", "changes", "status", "action"],
-            "properties": {
-                "updated_content": {"type": "string", "description": "업데이트된 메시지 내용"},
-                "changes": {"type": "string", "description": "변경된 내용 요약"},
-                "status": {"type": "string", "enum": ["success", "error"], "description": "성공/실패 여부"},
-                "action": {"type": "string", "enum": ["add", "remove", "update"], "description": "수행된 작업 유형"},
-                "error": {"type": "string", "description": "오류 메시지 (오류 발생시)"},
-                "affected_rounds": {
-                    "type": "array", 
-                    "items": {"type": "integer"}, 
-                    "description": "영향받은 차수 목록"
-                },
-                "user_role": {"type": "string", "description": "사용자 역할 (딜러/서포터)"}
-            }
-        }
         
         # OpenAI에 보낼 프롬프트
         prompt = f"""
@@ -549,66 +535,48 @@ class ThreadCommands(commands.Cog):
 """
         
         # API 요청
+        messages = [
+            {"role": "system", "content": f"당신은 디스코드 봇의 레이드 일정 관리 기능을 돕는 AI 비서입니다. {'차수 지정 모드에서는 각 숫자는 차수를 의미합니다(예: 1딜 2딜은 1차와 2차에 딜러로 참가)' if is_round_specification else '인원 지정 모드에서는 숫자는 해당 역할로 참가할 횟수를 의미합니다(예: 1폿 3딜은 서포터 1회, 딜러 3회 참가)'} 사용자는 각 차수마다 최대 1번만 참여 가능합니다."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = await self.call_openai_api(
+            messages=messages,
+            model="gpt-4-0125-preview",
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
+        
+        if "error" in response:
+            return {"status": "error", "error": response["error"], "action": command_type}
+        
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self.openai_api_key}"
-                    },
-                    json={
-                        "model": "gpt-4-0125-preview",
-                        "messages": [
-                            {"role": "system", "content": f"당신은 디스코드 봇의 레이드 일정 관리 기능을 돕는 AI 비서입니다. {'차수 지정 모드에서는 각 숫자는 차수를 의미합니다(예: 1딜 2딜은 1차와 2차에 딜러로 참가)' if is_round_specification else '인원 지정 모드에서는 숫자는 해당 역할로 참가할 횟수를 의미합니다(예: 1폿 3딜은 서포터 1회, 딜러 3회 참가)'} 사용자는 각 차수마다 최대 1번만 참여 가능합니다."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.1,
-                        "response_format": {"type": "json_object"}
-                    }
-                ) as response:
-                    response_data = await response.json()
-                    
-                    if "error" in response_data:
-                        return {"error": f"OpenAI API 오류: {response_data['error']}", "status": "error", "action": command_type}
-                    
-                    if "choices" in response_data and len(response_data["choices"]) > 0:
-                        content = response_data["choices"][0]["message"]["content"]
-                        try:
-                            result = json.loads(content)
-                            
-                            # 응답 검증: 필수 필드가 있는지 확인
-                            if "status" not in result:
-                                result["status"] = "success"  # 기본값
-                            
-                            if "action" not in result:
-                                result["action"] = command_type
-                                
-                            if result["status"] == "error" and "error" not in result:
-                                result["error"] = "알 수 없는 오류가 발생했습니다."
-                                
-                            if result["status"] == "success" and ("updated_content" not in result or "changes" not in result):
-                                result["status"] = "error"
-                                result["error"] = "LLM 응답에 필수 필드가 누락되었습니다."
-                            
-                            self.save_to_cache(cache_key, result)
-                            return result
-                        except json.JSONDecodeError:
-                            return {
-                                "status": "error", 
-                                "error": "LLM 응답을 JSON으로 파싱할 수 없습니다.", 
-                                "action": command_type
-                            }
-                    else:
-                        return {
-                            "status": "error", 
-                            "error": "LLM 응답에서 데이터를 찾을 수 없습니다.", 
-                            "action": command_type
-                        }
-        except Exception as e:
+            result = json.loads(response["content"])
+            
+            # 응답 검증: 필수 필드가 있는지 확인
+            if "status" not in result:
+                result["status"] = "success"  # 기본값
+            
+            if "action" not in result:
+                result["action"] = command_type
+                
+            if result["status"] == "error" and "error" not in result:
+                result["error"] = "알 수 없는 오류가 발생했습니다."
+                
+            if result["status"] == "success" and ("updated_content" not in result or "changes" not in result):
+                result["status"] = "error"
+                result["error"] = "LLM 응답에 필수 필드가 누락되었습니다."
+            
+            # 응답이 유효한 경우 캐시에 저장
+            if result["status"] == "success":
+                # 결과 캐시에 저장
+                self.save_to_cache(cache_key, result)
+            
+            return result
+        except json.JSONDecodeError:
             return {
                 "status": "error", 
-                "error": f"OpenAI API 요청 중 오류: {e}", 
+                "error": "LLM 응답을 JSON으로 파싱할 수 없습니다.", 
                 "action": command_type
             }
 
