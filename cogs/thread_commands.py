@@ -13,6 +13,7 @@ import sys
 from typing import List, Dict, Any, Optional
 
 from .raid_scheduler_common import RaidSchedulerBase, logger
+from utils.raid_queue import raid_queue_manager, RoundInfo
 
 # 로깅 설정 변경: 표준 출력(stdout)으로 로그를 보내도록 설정
 logger = logging.getLogger('thread_commands')
@@ -292,293 +293,547 @@ class ThreadCommands(commands.Cog, RaidSchedulerBase):
             logger.error(f"캐시 저장 중 오류 발생: {e}")
     
     async def analyze_schedule_with_llm(self, thread_messages, message_content, command_type, user_name, user_id, command_params, user_mention):
-        """OpenAI API를 사용하여 일정 정보 분석"""
-        if not self.openai_api_key:
-            return {"status": "error", "error": "OpenAI API 키가 설정되지 않았습니다."}
-        
-        # 캐시 키 생성
-        cache_key = self.get_cache_key({
-            'thread_messages': thread_messages,
-            'message_content': message_content,
-            'command_type': command_type,
-            'user_name': user_name,
-            'user_id': user_id,
-            'command_message': command_params
-        })
-        
-        # 캐시 확인
-        cached_result = self.get_cached_result(cache_key)
-        if cached_result:
-            return cached_result
-        
-        # 메시지 포맷팅
-        formatted_messages = []
-        for msg in thread_messages:
-            formatted_messages.append(f"{msg['author']} ({msg['created_at']}): {msg['content']}")
-        
-        messages_text = "\n".join(formatted_messages)
-        
-        # 분석하려는 대상 스레드의 레이드 이름 추출 시도
-        raid_name = "레이드"
-        if "\n" in message_content:
-            first_line = message_content.split("\n")[0]
-            raid_name = first_line.strip()
-        
-        # 명령어 파라미터 분석
-        role_type = "알 수 없음"
-        
-        # 딜러/서포터 역할이 반복되는지 확인
-        dps_matches = list(re.finditer(r'(\d+)\s*딜(?:러)?', command_params.lower()))
-        supp_matches = list(re.finditer(r'(\d+)\s*(?:폿|서폿|서포터)', command_params.lower()))
-        
-        # 명령 유형 분석: '차수 지정' vs '인원 지정'
-        # - 같은 역할이 반복(예: "1딜 2딜")되면 차수 지정으로 해석
-        # - 다른 역할이 함께 있으면(예: "1폿 3딜") 인원수로 해석
-        
-        is_round_specification = False  # 기본값은 인원 지정 모드
-        round_role_map = []  # 기본 빈 리스트로 초기화
-        
-        if len(dps_matches) > 1 and len(supp_matches) == 0:
-            # 딜러 역할만 여러 번 반복됨 -> 차수 지정
-            is_round_specification = True
-            logger.info("차수 지정 모드 감지: 여러 차수의 딜러 지정 (예: 1딜 2딜)")
-        elif len(supp_matches) > 1 and len(dps_matches) == 0:
-            # 서포터 역할만 여러 번 반복됨 -> 차수 지정
-            is_round_specification = True
-            logger.info("차수 지정 모드 감지: 여러 차수의 서포터 지정 (예: 1폿 2폿)")
-        else:
-            # 역할이 섞여 있거나 각각 하나씩만 있음 -> 인원 지정
-            logger.info("인원 지정 모드 감지 (예: 1폿 3딜)")
-        
-        # 처리 모드에 따라 필요한 정보 준비
-        if is_round_specification:
-            # 차수 지정 모드: 각 차수별 역할 매핑 준비
-            
-            # 딜러 차수 매핑
-            for match in dps_matches:
-                round_num = int(match.group(1))
-                round_role_map.append({"round": round_num, "role": "딜러"})
-                logger.info(f"{round_num}차에 딜러 역할 지정")
-            
-            # 서포터 차수 매핑
-            for match in supp_matches:
-                round_num = int(match.group(1))
-                round_role_map.append({"round": round_num, "role": "서포터"})
-                logger.info(f"{round_num}차에 서포터 역할 지정")
-            
-            # 정렬: 차수 번호 기준
-            round_role_map.sort(key=lambda x: x["round"])
-            
-            # 기본 역할 (첫 번째 지정된 역할)
-            if round_role_map:
-                role_type = round_role_map[0]["role"]
-            
-            dps_count = 0
-            support_count = 0
-            total_rounds_needed = 0
-        else:
-            # 인원 지정 모드: 딜러/서포터 인원수 계산
-            dps_count = 0
-            support_count = 0
-            
-            # "X딜"에서 X는 인원 수를 의미함
-            if dps_matches:
-                dps_count = int(dps_matches[0].group(1))
-                logger.info(f"딜러 {dps_count}명 감지")
-                role_type = "딜러"
-            
-            # "X폿"에서 X는 인원 수를 의미함
-            if supp_matches:
-                support_count = int(supp_matches[0].group(1))
-                logger.info(f"서포터 {support_count}명 감지")
-                if not role_type or role_type == "알 수 없음":
-                    role_type = "서포터"
-            
-            # 역할 키워드만 있는 경우 (숫자 없이)
-            if dps_count == 0 and "딜" in command_params.lower():
-                dps_count = 1
-                logger.info("숫자 없는 딜러 감지, 기본값 1명 설정")
-                role_type = "딜러"
-                
-            if support_count == 0 and ("폿" in command_params.lower() or "서폿" in command_params.lower() or "서포터" in command_params.lower()):
-                support_count = 1
-                logger.info("숫자 없는 서포터 감지, 기본값 1명 설정")
-                if not role_type or role_type == "알 수 없음":
-                    role_type = "서포터"
-            
-            # 총 필요한 차수 계산
-            total_rounds_needed = dps_count + support_count
-            logger.info(f"총 필요 차수: {total_rounds_needed} (딜러: {dps_count}명, 서포터: {support_count}명)")
-        
-        # 차수 지정 확인 (차수를 명시적으로 지정한 경우 해당 차수에만 추가)
-        target_round = None
-        round_match = re.search(r'(\d+)\s*차', command_params)
-        if round_match:
-            target_round = int(round_match.group(1))
-            logger.info(f"특정 차수 지정됨: {target_round}차")
-        
-        # OpenAI에 보낼 프롬프트
-        prompt = f"""
-{user_name}(ID: {user_id})님이 '{raid_name}' 레이드 스레드에서 일정 {command_type} 명령어를 사용했습니다.
-
-## 원본 일정 메시지:
-{message_content}
-
-## 스레드 대화 내용:
-{messages_text}
-
-## 명령어 파라미터:
-{command_params}
-
-## 명령 해석 모드:
-{'차수 지정 모드' if is_round_specification else '인원 지정 모드'}
-
-## 사용자 정보:
-- 사용자 이름: {user_name}
-- 사용자 ID: {user_id}
-- 멘션 태그: {user_mention}
-- 기본 역할 유형: {role_type}
-- 특정 차수 지정: {target_round if target_round else "없음"}
-
-"""
-
-        if is_round_specification:
-            # 차수 지정 모드 프롬프트
-            round_info = "\n".join([f"- {item['round']}차: {item['role']}" for item in round_role_map])
-            prompt += f"""
-## 차수별 역할 지정:
-{round_info}
-
-## 명령어 해석 방법:
-"1딜 2딜"과 같은 명령어에서 숫자는 차수를 의미합니다:
-- "1딜"은 1차에 딜러로 참가
-- "2딜"은 2차에 딜러로 참가
-- "3폿"은 3차에 서포터로 참가
-
-## 중요 지침:
-1. 사용자는 한 차수에 최대 1회만 등록 가능합니다(중복 금지).
-2. 위에 명시된 차수와 역할에 맞게 정확히 사용자를 등록하세요.
-3. 각 차수별로 서포터는 최대 2명, 딜러는 최대 6명으로 제한됩니다.
-
-## 작업 방법:
-1. 일정 추가(추가):
-   a. 명시된 각 차수에 정해진 역할로 사용자를 추가합니다.
-   b. "1딜 2딜 3폿"인 경우:
-      - 1차에 딜러로 추가
-      - 2차에 딜러로 추가
-      - 3차에 서포터로 추가
-   c. 필요한 차수가 없으면 새로운 차수를 생성합니다.
-"""
-        else:
-            # 인원 지정 모드 프롬프트
-            prompt += f"""
-## 요청 분석:
-- 딜러 참가 횟수: {dps_count}회
-- 서포터 참가 횟수: {support_count}회
-- 총 필요 차수: {total_rounds_needed}회
-
-## 명령어 해석 방법:
-"1폿 3딜"과 같은 명령어에서 숫자는 해당 역할로 참가할 횟수(인원수)를 의미합니다:
-- "1폿"은 1회 서포터로 참가
-- "3딜"은 3회 딜러로 참가
-즉, 이 사용자는 총 4개 차수에 참가하게 됩니다.
-
-## 중요 지침:
-1. 사용자는 한 차수에 최대 1회만 등록 가능합니다(중복 금지).
-2. 여러 역할과 횟수가 지정된 경우(예: "1폿 3딜"), 서포터 역할을 먼저 낮은 차수에 배치하고, 나머지 차수에 딜러 역할을 배치합니다.
-3. 특정 차수가 명시적으로 지정된 경우(예: "2차 딜러"), 해당 차수에만 추가하고 나머지는 무시합니다.
-4. 각 차수별로 서포터는 최대 2명, 딜러는 최대 6명으로 제한됩니다.
-
-## 작업 방법:
-1. 일정 추가(추가):
-   a. 사용자의 요청에 따라 적절한 차수와 역할에 추가합니다.
-   b. "1폿 3딜"인 경우:
-      - 첫 번째 가능한 차수에 서포터로 1회 추가
-      - 다음 세 개의 가능한 차수에 딜러로 각각 1회씩 추가
-   c. 필요한 차수가 없으면 새로운 차수를 생성합니다.
-   d. 이미 등록된 차수가 있으면 해당 차수는 건너뛰고 다음 차수에 추가합니다.
-"""
-
-        # 공통 프롬프트 부분
-        prompt += f"""
-2. 일정 제거(제거):
-   - 모든 차수에서 사용자의 참가 정보를 제거합니다.
-   - 특정 차수만 지정된 경우, 해당 차수에서만 제거합니다.
-
-3. 일정 수정(수정):
-   - 요청된 변경사항에 따라 일정 정보를 업데이트합니다.
-
-{user_name}님의 의도를 파악하여 원본 일정 메시지를 {command_type}해주세요.
-원본 메시지의 형식을 최대한 유지하면서 일정 정보만 업데이트해주세요.
-각 차수마다 서포터(0/2), 딜러(0/6) 형식의 카운트를 반드시 정확하게 업데이트해야 합니다.
-
-다음 JSON 형식으로 응답해주세요:
-```json
-{{
-  "updated_content": "업데이트된 메시지 내용",
-  "changes": "어떤 변경이 이루어졌는지 요약",
-  "status": "success 또는 error",
-  "action": "{command_type}",
-  "affected_rounds": [영향받은 차수 번호들],
-  "user_role": "사용자 역할 (딜러 또는 서포터)"
-}}
-```
-
-만약 오류가 발생한 경우:
-```json
-{{
-  "status": "error",
-  "error": "오류 메시지",
-  "action": "{command_type}"
-}}
-```
-"""
-        
-        # API 요청
-        messages = [
-            {"role": "system", "content": f"당신은 디스코드 봇의 레이드 일정 관리 기능을 돕는 AI 비서입니다. {'차수 지정 모드에서는 각 숫자는 차수를 의미합니다(예: 1딜 2딜은 1차와 2차에 딜러로 참가)' if is_round_specification else '인원 지정 모드에서는 숫자는 해당 역할로 참가할 횟수를 의미합니다(예: 1폿 3딜은 서포터 1회, 딜러 3회 참가)'} 사용자는 각 차수마다 최대 1번만 참여 가능합니다."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        response = await self.call_openai_api(
-            messages=messages,
-            model="gpt-4-0125-preview",
-            temperature=0.1,
-            response_format={"type": "json_object"}
-        )
-        
-        if "error" in response:
-            return {"status": "error", "error": response["error"], "action": command_type}
-        
+        """LLM을 사용하여 일정 변경 분석"""
         try:
-            result = json.loads(response["content"])
-            
-            # 응답 검증: 필수 필드가 있는지 확인
-            if "status" not in result:
-                result["status"] = "success"  # 기본값
-            
-            if "action" not in result:
-                result["action"] = command_type
-                
-            if result["status"] == "error" and "error" not in result:
-                result["error"] = "알 수 없는 오류가 발생했습니다."
-                
-            if result["status"] == "success" and ("updated_content" not in result or "changes" not in result):
-                result["status"] = "error"
-                result["error"] = "LLM 응답에 필수 필드가 누락되었습니다."
-            
-            # 응답이 유효한 경우 캐시에 저장
-            if result["status"] == "success":
-                # 결과 캐시에 저장
-                self.save_to_cache(cache_key, result)
-            
-            return result
-        except json.JSONDecodeError:
-            return {
-                "status": "error", 
-                "error": "LLM 응답을 JSON으로 파싱할 수 없습니다.", 
-                "action": command_type
+            # 캐시 키 생성
+            cache_data = {
+                "thread_messages": thread_messages[-5:] if thread_messages else [],  # 최근 5개 메시지만 사용
+                "message_content": message_content[:100],  # 처음 100자만 사용
+                "command_type": command_type,
+                "user_name": user_name,
+                "command_params": command_params
             }
+            cache_key = self.get_cache_key(cache_data)
+            
+            # 캐시 확인
+            cached_result = self.get_cached_result(cache_key)
+            if cached_result:
+                return cached_result
+            
+            # 스레드 ID 가져오기
+            thread_id = str(thread_messages[0]['author_id']) if thread_messages else "unknown"
+            
+            # 명령어 타입 확인 및 처리
+            if command_type == "추가":
+                # 추가 명령어 처리
+                # 여러 역할과 횟수를 처리하기 위한 정규식 패턴
+                dealer_pattern = re.compile(r'딜(\d+)|(\d+)딜러?|dealer(\d+)|(\d+)dealer')
+                support_pattern = re.compile(r'폿(\d+)|(\d+)폿|서폿(\d+)|(\d+)서폿|서포터(\d+)|(\d+)서포터|support(\d+)|(\d+)support')
+                
+                # 역할별 추가 횟수 추출
+                dealer_count = 0
+                support_count = 0
+                
+                # 딜러 횟수 추출
+                dealer_matches = dealer_pattern.findall(command_params.lower())
+                for match_groups in dealer_matches:
+                    for group in match_groups:
+                        if group and group.isdigit():
+                            dealer_count += int(group)
+                            break
+                
+                # 서포터 횟수 추출
+                support_matches = support_pattern.findall(command_params.lower())
+                for match_groups in support_matches:
+                    for group in match_groups:
+                        if group and group.isdigit():
+                            support_count += int(group)
+                            break
+                
+                # 숫자 없이 역할만 언급된 경우 처리
+                if dealer_count == 0 and (re.search(r'딜러?|dealer', command_params.lower()) and not re.search(r'\d+\s*딜러?|\d+\s*dealer', command_params.lower())):
+                    dealer_count = 1
+                
+                if support_count == 0 and (re.search(r'폿|서폿|서포터|support', command_params.lower()) and not re.search(r'\d+\s*폿|\d+\s*서폿|\d+\s*서포터|\d+\s*support', command_params.lower())):
+                    support_count = 1
+                
+                # 라운드 추출
+                round_num = 0  # 기본값
+                round_match = re.search(r'(\d+)\s*차', command_params)
+                if round_match:
+                    round_num = int(round_match.group(1))
+                
+                # 큐 객체 가져오기
+                queue = raid_queue_manager.get_queue(thread_id)
+                
+                # 사용자의 멘션 형태 참조 (Discord에 표시되는 방식)
+                user_mention_format = f"<@{user_id}>"
+                logger.info(f"사용자 멘션 형태: {user_mention_format}")
+                logger.info(f"추가 명령어 차수 정보: {round_num}차")
+                
+                # 기존에 큐에 있던 사용자 데이터 확인
+                user_elements = queue.get_elements_by_user(user_name)
+                if not user_elements:
+                    # 멘션 형태로도 확인
+                    user_elements = queue.get_elements_by_user(user_mention_format)
+                    if user_elements:
+                        logger.info(f"사용자 {user_name}은 멘션 형태({user_mention_format})로 큐에 있음")
+                
+                # 딜러 추가
+                for _ in range(dealer_count):
+                    queue_element = raid_queue_manager.process_add_command(
+                        thread_id, 
+                        user_id, 
+                        user_mention_format,  # 멘션 형태로 통일
+                        "dealer", 
+                        round_num  # 실제 차수 정보 전달
+                    )
+                    logger.info(f"딜러 추가됨: {queue_element} (차수: {round_num})")
+                
+                # 서포터 추가
+                for _ in range(support_count):
+                    queue_element = raid_queue_manager.process_add_command(
+                        thread_id, 
+                        user_id, 
+                        user_mention_format,  # 멘션 형태로 통일
+                        "support", 
+                        round_num  # 실제 차수 정보 전달
+                    )
+                    logger.info(f"서포터 추가됨: {queue_element} (차수: {round_num})")
+                
+                # 적어도 하나의 역할이 추가되었는지 확인
+                if dealer_count == 0 and support_count == 0:
+                    # 역할 패턴이 없는 경우 기본 처리(기존 방식)
+                    role_match = re.search(r'(서포터|서폿|support|딜러|딜|dealer)', command_params.lower())
+                    role = "dealer"  # 기본값
+                    if role_match:
+                        role_text = role_match.group(1)
+                        if role_text in ["서포터", "서폿", "support"]:
+                            role = "support"
+                    
+                    queue_element = raid_queue_manager.process_add_command(
+                        thread_id, 
+                        user_id, 
+                        user_mention_format,  # 멘션 형태로 통일
+                        role, 
+                        round_num  # 실제 차수 정보 전달
+                    )
+                    logger.info(f"기본 역할({role}) 추가됨: {queue_element} (차수: {round_num})")
+                
+                # 원본 메시지 파싱
+                raid_data = await self.parse_message_to_data(message_content)
+                
+                # 메시지에서 "없음" 텍스트가 있는지 확인하고 제거
+                message_content = message_content.replace("없음", "")
+                
+                # 큐에서 일정 메시지 생성
+                schedule_message, round_infos = queue.generate_schedule_message()
+                
+                # 원본 헤더 정보 유지
+                header_lines = []
+                for line in message_content.split("\n"):
+                    if line.strip() and not re.match(r'^\d+차', line) and "서포터" not in line and "딜러" not in line:
+                        header_lines.append(line)
+                    else:
+                        break
+                
+                header = "\n".join(header_lines)
+                updated_content = f"{header}\n\n{schedule_message}"
+                
+                # 영향받은 차수 확인
+                affected_rounds = [ri.round_index for ri in round_infos if (
+                    (user_name in [s[0] for s in ri.support]) or
+                    (user_name in [d[0] for d in ri.dealer])
+                )]
+                
+                # 역할 텍스트 생성
+                roles_text = []
+                if dealer_count > 0:
+                    roles_text.append(f"딜러 {dealer_count}회")
+                if support_count > 0:
+                    roles_text.append(f"서포터 {support_count}회")
+                role_description = " + ".join(roles_text) if roles_text else "딜러 1회"
+                
+                result = {
+                    "status": "success",
+                    "updated_content": updated_content,
+                    "affected_rounds": affected_rounds,
+                    "user_role": role_description,
+                    "changes": f"{user_name}님이 {', '.join([str(r) + '차' for r in affected_rounds])}에 참여"
+                }
+                
+                # 캐시에 저장
+                self.save_to_cache(cache_key, result)
+                return result
+                
+            elif command_type == "제거":
+                # 제거 명령어 처리
+                # 1. 명령어 파라미터 파싱
+                dealer_count = 0
+                support_count = 0
+                round_num = None
+                
+                # 정규식으로 "{숫자}딜 {숫자}폿" 패턴과 차수 파싱
+                dealer_match = re.search(r'(\d+)\s*딜러?', command_params) or re.search(r'(\d+)\s*딜?', command_params)
+                support_match = re.search(r'(\d+)\s*서포?터?', command_params) or re.search(r'(\d+)\s*폿', command_params)
+                round_match = re.search(r'(\d+)\s*차', command_params)
+                
+                if dealer_match:
+                    dealer_count = int(dealer_match.group(1))
+                
+                if support_match:
+                    support_count = int(support_match.group(1))
+                
+                if round_match:
+                    round_num = int(round_match.group(1))
+                
+                logger.info(f"[DEBUG] 제거 요청 파싱 결과: dealer_count={dealer_count}, support_count={support_count}, round={round_num}")
+                
+                # 스레드 ID 가져오기
+                thread_id = thread_messages[0]['author_id'] if thread_messages else "unknown"
+                
+                # 큐 객체 가져오기
+                queue = raid_queue_manager.get_queue(thread_id)
+                
+                # 2. 사용자 참여 상태 확인 (메시지 파싱)
+                raid_data = await self.parse_message_to_data(message_content)
+                
+                # 메시지에서 현재 사용자가 어떤 차수와 역할로 참여하고 있는지 확인
+                user_status = []  # (round, role) 형식으로 저장
+                
+                for round_info in raid_data.rounds:
+                    # 서포터로 참여 중인지 확인
+                    for supporter in round_info.confirmed_supporters:
+                        if supporter[0].lower() == user_name.lower() or (f"<@{user_id}>" in supporter[0]):
+                            user_status.append((round_info.round_index, "support"))
+                            logger.info(f"사용자 {user_name}가 {round_info.round_index}차에 서포터로 참여 중")
+                    
+                    # 딜러로 참여 중인지 확인
+                    for dealer in round_info.confirmed_dealers:
+                        if dealer[0].lower() == user_name.lower() or (f"<@{user_id}>" in dealer[0]):
+                            user_status.append((round_info.round_index, "dealer"))
+                            logger.info(f"사용자 {user_name}가 {round_info.round_index}차에 딜러로 참여 중")
+                
+                # 3. 역할별 제거 처리
+                removed_elements = []
+                
+                # 3.1 딜러 제거
+                dealers_removed = 0
+                if dealer_count > 0:
+                    logger.info(f"[DEBUG] {dealer_count}명의 딜러 제거 시도 중...")
+                    
+                    # 여러 형태의 사용자 식별자로 시도
+                    identifiers = [user_name]
+                    if user_id:
+                        identifiers.append(f"<@{user_id}>")  # 멘션 형식 추가
+                    
+                    # 각 차수별로 시도할 차수 목록 생성
+                    round_numbers = [round_num] if round_num else [None]  # None은 모든 차수에서 제거
+                    
+                    # 지정한 숫자만큼 딜러 제거 시도
+                    attempts = 0
+                    max_attempts = dealer_count * 2  # 시도 횟수 제한 (무한 루프 방지)
+                    
+                    while dealers_removed < dealer_count and attempts < max_attempts:
+                        removed = None
+                        
+                        # 각 식별자와 차수 조합으로 시도
+                        for identifier in identifiers:
+                            for r_num in round_numbers:
+                                if not removed:  # 아직 제거 안된 경우만 시도
+                                    removed = raid_queue_manager.process_remove_command(
+                                        thread_id, 
+                                        identifier, 
+                                        "dealer", 
+                                        r_num
+                                    )
+                                    if removed:
+                                        logger.info(f"[DEBUG] 딜러 제거 성공 ({dealers_removed+1}/{dealer_count}): {removed} (식별자: {identifier}, 차수: {r_num})")
+                                        break
+                        
+                        # 제거 성공 여부에 따른 처리
+                        if removed:
+                            removed_elements.append(removed)
+                            dealers_removed += 1
+                        else:
+                            # 모든 시도 실패 시 중단
+                            logger.warning(f"[DEBUG] 딜러 제거 실패: 더 이상 제거할 딜러가 없음 ({dealers_removed}/{dealer_count} 완료)")
+                            break
+                        
+                        attempts += 1
+                    
+                    logger.info(f"[DEBUG] 딜러 제거 완료: {dealers_removed}/{dealer_count} 성공")
+                
+                # 3.2 서포터 제거
+                supporters_removed = 0
+                if support_count > 0:
+                    logger.info(f"[DEBUG] {support_count}명의 서포터 제거 시도 중...")
+                    
+                    # 여러 형태의 사용자 식별자로 시도
+                    identifiers = [user_name]
+                    if user_id:
+                        identifiers.append(f"<@{user_id}>")  # 멘션 형식 추가
+                    
+                    # 각 차수별로 시도할 차수 목록 생성
+                    round_numbers = [round_num] if round_num else [None]  # None은 모든 차수에서 제거
+                    
+                    # 지정한 숫자만큼 서포터 제거 시도
+                    attempts = 0
+                    max_attempts = support_count * 2  # 시도 횟수 제한 (무한 루프 방지)
+                    
+                    while supporters_removed < support_count and attempts < max_attempts:
+                        removed = None
+                        
+                        # 각 식별자와 차수 조합으로 시도
+                        for identifier in identifiers:
+                            for r_num in round_numbers:
+                                if not removed:  # 아직 제거 안된 경우만 시도
+                                    removed = raid_queue_manager.process_remove_command(
+                                        thread_id, 
+                                        identifier, 
+                                        "support", 
+                                        r_num
+                                    )
+                                    if removed:
+                                        logger.info(f"[DEBUG] 서포터 제거 성공 ({supporters_removed+1}/{support_count}): {removed} (식별자: {identifier}, 차수: {r_num})")
+                                        break
+                        
+                        # 제거 성공 여부에 따른 처리
+                        if removed:
+                            removed_elements.append(removed)
+                            supporters_removed += 1
+                        else:
+                            # 모든 시도 실패 시 중단
+                            logger.warning(f"[DEBUG] 서포터 제거 실패: 더 이상 제거할 서포터가 없음 ({supporters_removed}/{support_count} 완료)")
+                            break
+                        
+                        attempts += 1
+                    
+                    logger.info(f"[DEBUG] 서포터 제거 완료: {supporters_removed}/{support_count} 성공")
+                
+                # 3.3 역할 지정이 없는 경우 기본 제거 로직
+                if dealer_count == 0 and support_count == 0:
+                    # 차수가 지정된 경우, 해당 차수에서 제거
+                    if round_num:
+                        # 참여 중인 역할에 따라 제거
+                        for user_round, user_role in user_status:
+                            if user_round == round_num:
+                                removed = raid_queue_manager.process_remove_command(
+                                    thread_id, 
+                                    user_name, 
+                                    "dealer" if user_role == "dealer" else "support", 
+                                    round_num
+                                )
+                                
+                                # 멘션 형식으로 재시도
+                                if not removed and user_id:
+                                    removed = raid_queue_manager.process_remove_command(
+                                        thread_id, 
+                                        f"<@{user_id}>", 
+                                        "dealer" if user_role == "dealer" else "support", 
+                                        round_num
+                                    )
+                                
+                                if removed:
+                                    removed_elements.append(removed)
+                                    if user_role == "dealer":
+                                        dealers_removed += 1
+                                    else:
+                                        supporters_removed += 1
+                                    logger.info(f"[DEBUG] {user_role} 제거 성공 (차수 {round_num}): {removed}")
+                                    break
+                    else:
+                        # 차수 지정이 없는 경우, 모든 역할 시도
+                        for role in ["dealer", "support"]:
+                            removed = raid_queue_manager.process_remove_command(
+                                thread_id, 
+                                user_name, 
+                                role, 
+                                None
+                            )
+                            
+                            # 멘션 형식으로 재시도
+                            if not removed and user_id:
+                                removed = raid_queue_manager.process_remove_command(
+                                    thread_id, 
+                                    f"<@{user_id}>", 
+                                    role, 
+                                    None
+                                )
+                            
+                            if removed:
+                                removed_elements.append(removed)
+                                if role == "dealer":
+                                    dealers_removed += 1
+                                else:
+                                    supporters_removed += 1
+                                logger.info(f"[DEBUG] {role} 제거 성공: {removed}")
+                                break
+                
+                # 4. 제거 결과 처리
+                if removed_elements:
+                    # 4.1 메시지에서 "없음" 텍스트가 있는지 확인하고 제거
+                    message_content = message_content.replace("없음", "")
+                    
+                    # 4.2 큐에서 일정 메시지 생성
+                    schedule_message, round_infos = queue.generate_schedule_message()
+                    
+                    # 4.3 원본 헤더 정보 유지
+                    header_lines = []
+                    for line in message_content.split("\n"):
+                        if line.strip() and not re.match(r'^\d+차', line) and "서포터" not in line and "딜러" not in line:
+                            header_lines.append(line)
+                        else:
+                            break
+                    
+                    header = "\n".join(header_lines)
+                    updated_content = f"{header}\n\n{schedule_message}"
+                    
+                    # 4.4 제거된 역할 및 차수 정보 집계
+                    dealer_removed = len([elem for elem in removed_elements if elem.role.lower() == "dealer"])
+                    support_removed = len([elem for elem in removed_elements if elem.role.lower() == "support"])
+                    affected_rounds = list(set([elem.round for elem in removed_elements if elem.round > 0]))
+                    
+                    # 기본 차수 (메시지에서 파싱된 차수)
+                    if not affected_rounds and round_num:
+                        affected_rounds = [round_num]
+                    
+                    # 4.5 역할 텍스트 생성
+                    roles_text = []
+                    if dealer_removed > 0:
+                        roles_text.append(f"딜러 {dealer_removed}회")
+                    if support_removed > 0:
+                        roles_text.append(f"서포터 {support_removed}회")
+                    role_description = " + ".join(roles_text) if roles_text else "참여"
+                    
+                    result = {
+                        "status": "success",
+                        "updated_content": updated_content,
+                        "affected_rounds": affected_rounds,
+                        "user_role": role_description,
+                        "changes": f"{user_name}님의 {role_description} 참여가 제거됨"
+                    }
+                    
+                    # 캐시에 저장
+                    self.save_to_cache(cache_key, result)
+                    return result
+                else:
+                    # 4.6 제거 실패 처리
+                    # 메시지에서 멘션 형태로 사용자 검색
+                    mention_pattern = f"<@{user_id}>"
+                    if mention_pattern in message_content:
+                        logger.info(f"메시지에서 멘션 형태 발견: {mention_pattern}, 다시 시도합니다")
+                        
+                        # 멘션 형태로 다시 시도 (지정된 차수와 역할 사용)
+                        role_to_try = "support" if support_count > 0 else ("dealer" if dealer_count > 0 else None)
+                        
+                        removed = raid_queue_manager.process_remove_command(
+                            thread_id, 
+                            mention_pattern, 
+                            role_to_try, 
+                            round_num
+                        )
+                        
+                        if removed:
+                            # 제거 성공 시 결과 처리 (큐 업데이트 및 메시지 생성)
+                            message_content = message_content.replace("없음", "")
+                            schedule_message, round_infos = queue.generate_schedule_message()
+                            
+                            header_lines = []
+                            for line in message_content.split("\n"):
+                                if line.strip() and not re.match(r'^\d+차', line) and "서포터" not in line and "딜러" not in line:
+                                    header_lines.append(line)
+                                else:
+                                    break
+                            
+                            header = "\n".join(header_lines)
+                            updated_content = f"{header}\n\n{schedule_message}"
+                            
+                            role_text = "서포터" if removed.role.lower() == "support" else "딜러"
+                            
+                            result = {
+                                "status": "success",
+                                "updated_content": updated_content,
+                                "affected_rounds": [removed.round] if removed.round > 0 else (
+                                    [round_num] if round_num else []
+                                ),
+                                "user_role": role_text,
+                                "changes": f"{user_name}님의 {role_text} 참여가 제거됨"
+                            }
+                            
+                            # 캐시에 저장
+                            self.save_to_cache(cache_key, result)
+                            return result
+                    
+                    # 제거 실패
+                    return {
+                        "status": "error",
+                        "error": f"{user_name}님의 참여 정보를 찾을 수 없습니다. (역할: {'서포터' if support_count > 0 else '딜러' if dealer_count > 0 else '미지정'}, 차수: {round_num if round_num else '모든 차수'})"
+                    }
+            else:
+                # 수정 명령어는 기존 방식으로 처리
+                # 프롬프트 구성
+                messages = [
+                    {"role": "system", "content": """너는 레이드 참여 일정을 관리해주는 전문 비서야. 
+사용자들이 명령어를 통해 레이드 일정에 참여 의사를 밝히면, 그에 맞게 일정표를 업데이트해줘야 해.
+최대한 간결하게 응답하고, 정확한 결과만 보여줘."""},
+                    {"role": "user", "content": f"""
+현재 레이드 일정 메시지:
+```
+{message_content}
+```
+
+최근 스레드 대화:
+```
+{json.dumps(thread_messages, ensure_ascii=False, indent=2)}
+```
+
+명령어: {command_type} {command_params}
+명령을 내린 사용자: {user_name} ({user_mention})
+
+위 정보를 바탕으로 레이드 일정을 적절히 수정해줘. 
+레이드 일정 파싱 규칙:
+1. '차수'로 구분 (1차, 2차 등)
+2. 각 차수 내부:
+   - when: 일시
+   - 서포터(n/2): 서포터 목록
+   - 딜러(n/6): 딜러 목록
+   - note: 기타 참고사항
+
+응답 형식:
+```json
+{
+  "status": "success",
+  "updated_content": "수정된 전체 메시지 내용",
+  "affected_rounds": [영향 받은 차수 번호들],
+  "user_role": "사용자 역할(서포터 또는 딜러)",
+  "changes": "간략한 변경 내용 설명"
+}
+```
+
+어떤 오류가 있으면:
+```json
+{
+  "status": "error",
+  "error": "오류 메시지"
+}
+```"""}
+                ]
+                
+                # LLM 호출
+                llm_response = await self.call_openai_api(
+                    messages=messages,
+                    model="gpt-4-0125-preview",
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+                
+                if llm_response and "content" in llm_response:
+                    try:
+                        result = json.loads(llm_response["content"])
+                        # 캐시에 저장
+                        self.save_to_cache(cache_key, result)
+                        return result
+                    except json.JSONDecodeError:
+                        logger.error(f"LLM 응답을 JSON으로 파싱할 수 없습니다: {llm_response['content']}")
+                        return {"status": "error", "error": "응답 분석 중 오류가 발생했습니다."}
+                else:
+                    logger.error("LLM 응답이 올바르지 않습니다.")
+                    return {"status": "error", "error": "AI 응답이 올바르지 않습니다."}
+                    
+        except Exception as e:
+            logger.error(f"일정 분석 중 오류: {e}")
+            return {"status": "error", "error": f"처리 중 오류가 발생했습니다: {str(e)}"}
 
     def validate_and_fix_schedule(self, result):
         """
@@ -642,9 +897,14 @@ class ThreadCommands(commands.Cog, RaidSchedulerBase):
                         if count_match:
                             current_round["supporter_count"] = int(count_match.group(1))
                         
-                        if support_line[1].strip():
+                        if support_line[1].strip() and support_line[1].strip() != "없음":
                             supporters = [s.strip() for s in support_line[1].strip().split(",")]
                             current_round["supporters"] = supporters
+                            # 실제 서포터 수를 기준으로 카운트 재설정
+                            current_round["supporter_count"] = len(supporters)
+                        else:
+                            current_round["supporters"] = []
+                            current_round["supporter_count"] = 0
                 elif "딜러" in line and "(" in line and ")" in line:
                     # 딜러 정보 (예: 딜러(3/6): 사용자1, 사용자2, 사용자3)
                     dealer_line = line.split(":", 1)
@@ -653,9 +913,14 @@ class ThreadCommands(commands.Cog, RaidSchedulerBase):
                         if count_match:
                             current_round["dealer_count"] = int(count_match.group(1))
                         
-                        if dealer_line[1].strip():
+                        if dealer_line[1].strip() and dealer_line[1].strip() != "없음":
                             dealers = [d.strip() for d in dealer_line[1].strip().split(",")]
                             current_round["dealers"] = dealers
+                            # 실제 딜러 수를 기준으로 카운트 재설정
+                            current_round["dealer_count"] = len(dealers)
+                        else:
+                            current_round["dealers"] = []
+                            current_round["dealer_count"] = 0
                 elif line.startswith("when:"):
                     current_round["when"] = line[5:].strip()
                 elif line.startswith("who:"):
@@ -786,15 +1051,26 @@ class ThreadCommands(commands.Cog, RaidSchedulerBase):
             
             # 기존 정보 유지
             new_lines.append(f"when:{round_info['when']}")
-            new_lines.append(f"who:{round_info['who']}")
+            
+            # who 필드는 사용하지 않는 경우도 있어 조건부로 추가
+            if 'who' in round_info:
+                new_lines.append(f"who:{round_info['who']}")
             
             # 서포터 정보
-            supporters_str = ", ".join(round_info["supporters"]) if round_info["supporters"] else ""
-            new_lines.append(f"서포터({round_info['supporter_count']}/2):{supporters_str}")
+            supporters_str = ""
+            if round_info["supporters"]:
+                supporters_str = ", ".join(round_info["supporters"])
+                new_lines.append(f"서포터({round_info['supporter_count']}/2): {supporters_str}")
+            else:
+                new_lines.append(f"서포터(0/2):")
             
             # 딜러 정보
-            dealers_str = ", ".join(round_info["dealers"]) if round_info["dealers"] else ""
-            new_lines.append(f"딜러({round_info['dealer_count']}/6):{dealers_str}")
+            dealers_str = ""
+            if round_info["dealers"]:
+                dealers_str = ", ".join(round_info["dealers"])
+                new_lines.append(f"딜러({round_info['dealer_count']}/6): {dealers_str}")
+            else:
+                new_lines.append(f"딜러(0/6):")
             
             # 메모
             new_lines.append(f"note:{round_info['note']}")

@@ -507,8 +507,10 @@ class RaidSchedulerBase:
                     parts = stripped_line.split(":", 1)
                     count_match = re.search(r'\((\d+)/\d+\)', parts[0])
                     
-                    if len(parts) > 1 and parts[1].strip():
+                    if len(parts) > 1 and parts[1].strip() and parts[1].strip() != "없음":
                         supporters = [s.strip() for s in parts[1].strip().split(",")]
+                        # "없음"이 포함된 항목 필터링
+                        supporters = [s for s in supporters if s != "없음"]
                         current_round.confirmed_supporters = [(s, "") for s in supporters]
                 
                 # 딜러 정보
@@ -516,8 +518,10 @@ class RaidSchedulerBase:
                     parts = stripped_line.split(":", 1)
                     count_match = re.search(r'\((\d+)/\d+\)', parts[0])
                     
-                    if len(parts) > 1 and parts[1].strip():
+                    if len(parts) > 1 and parts[1].strip() and parts[1].strip() != "없음":
                         dealers = [d.strip() for d in parts[1].strip().split(",")]
+                        # "없음"이 포함된 항목 필터링
+                        dealers = [d for d in dealers if d != "없음"]
                         current_round.confirmed_dealers = [(d, "") for d in dealers]
                 
                 # 노트 정보
@@ -553,12 +557,20 @@ class RaidSchedulerBase:
             lines.append(f"- who:")
             
             # 서포터 정보
-            supporters_str = ", ".join([s[0] for s in round_info.confirmed_supporters]) if round_info.confirmed_supporters else ""
-            lines.append(f"  - 서포터({len(round_info.confirmed_supporters)}/{round_info.supporter_max}): {supporters_str}")
+            supporters_str = ""
+            if round_info.confirmed_supporters:
+                supporters_str = ", ".join([s[0] for s in round_info.confirmed_supporters])
+                lines.append(f"  - 서포터({len(round_info.confirmed_supporters)}/{round_info.supporter_max}): {supporters_str}")
+            else:
+                lines.append(f"  - 서포터(0/{round_info.supporter_max}):")
             
             # 딜러 정보
-            dealers_str = ", ".join([d[0] for d in round_info.confirmed_dealers]) if round_info.confirmed_dealers else ""
-            lines.append(f"  - 딜러({len(round_info.confirmed_dealers)}/{round_info.dealer_max}): {dealers_str}")
+            dealers_str = ""
+            if round_info.confirmed_dealers:
+                dealers_str = ", ".join([d[0] for d in round_info.confirmed_dealers])
+                lines.append(f"  - 딜러({len(round_info.confirmed_dealers)}/{round_info.dealer_max}): {dealers_str}")
+            else:
+                lines.append(f"  - 딜러(0/{round_info.dealer_max}):")
             
             # 노트 정보
             lines.append(f"- note: {round_info.note}")
