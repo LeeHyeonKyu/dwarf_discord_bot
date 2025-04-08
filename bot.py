@@ -10,7 +10,9 @@ Discord 봇의 메인 모듈.
 import asyncio
 import logging
 import os
+import threading
 from typing import Any, Dict, List, Optional, Union
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import discord
 from discord.ext import commands
@@ -31,6 +33,7 @@ logger = logging.getLogger("discord_bot")
 load_dotenv(".env.secret")
 TOKEN = os.getenv("DISCORD_TOKEN")
 PREFIX = os.getenv("COMMAND_PREFIX", "!")
+PORT = int(os.getenv("PORT", "8088"))
 
 # 인텐트 설정
 intents = discord.Intents.default()
@@ -39,6 +42,32 @@ intents.members = True
 
 # 봇 인스턴스 생성
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+
+# 상태 확인용 HTTP 서버 핸들러
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        """상태 확인 요청에 대한 응답을 처리합니다."""
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Bot is running')
+        
+    def log_message(self, format, *args):
+        """HTTP 서버 로그 메시지를 Discord 봇 로거로 리다이렉트합니다."""
+        logger.info(f"Health check: {format % args}")
+
+def start_http_server():
+    """상태 확인을 위한 HTTP 서버를 시작합니다."""
+    server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
+    logger.info(f"상태 확인 서버가 포트 {PORT}에서 시작되었습니다.")
+    server.serve_forever()
+
+# 별도의 스레드에서 HTTP 서버 시작
+def run_http_server():
+    """별도의 스레드에서 HTTP 서버를 실행합니다."""
+    http_thread = threading.Thread(target=start_http_server, daemon=True)
+    http_thread.start()
+    logger.info("상태 확인 HTTP 서버 스레드가 시작되었습니다.")
 
 
 @bot.event
@@ -126,6 +155,9 @@ async def main() -> None:
     
     확장 모듈을 로드하고 봇을 시작합니다.
     """
+    # 상태 확인 HTTP 서버 시작
+    run_http_server()
+    
     async with bot:
         await load_extensions()
         logger.info("봇 시작 중...")
