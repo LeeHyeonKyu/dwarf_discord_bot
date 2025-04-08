@@ -102,12 +102,19 @@ class Lostark(commands.Cog):
                 
                 # 멤버 설정 파일에서 멤버 정보 가져오기 (discord_name 등)
                 member_info = {}
+                # discord_id를 키로 하는 매핑 생성
+                discord_id_to_member = {}
                 for member in character_data:
-                    member_info[member.get('id')] = {
+                    member_id = member.get('id')
+                    discord_id = member.get('discord_id', '')
+                    
+                    member_info[discord_id] = {
+                        'id': member_id,
                         'discord_name': member.get('discord_name', '알 수 없음'),
-                        'discord_id': member.get('discord_id', ''),
                         'active': member.get('active', False)
                     }
+                    
+                    discord_id_to_member[member_id] = discord_id
             
             # 캐릭터 정보 파일 로드
             with open(character_file_path, 'r', encoding='utf-8') as file:
@@ -115,16 +122,26 @@ class Lostark(commands.Cog):
             
             # 특정 멤버 지정된 경우
             if member_id:
-                if member_id not in data:
+                # member_id로 discord_id 찾기 시도
+                discord_id = discord_id_to_member.get(member_id)
+                
+                # 직접 지정된 ID가 discord_id인지 확인
+                if member_id in data:
+                    discord_id = member_id
+                # member_id로 변환된 discord_id로 찾기
+                elif discord_id in data:
+                    pass
+                else:
                     await ctx.send(f"'{member_id}' 멤버의 캐릭터 정보를 찾을 수 없습니다.")
                     return
                 
                 # 해당 멤버의 캐릭터 정보로 임베드 생성
-                member_characters = data[member_id]
-                discord_name = member_info.get(member_id, {}).get('discord_name', '알 수 없음')
+                member_characters = data[discord_id]
+                member_display_id = member_info.get(discord_id, {}).get('id', 'Unknown')
+                discord_name = member_info.get(discord_id, {}).get('discord_name', '알 수 없음')
                 
                 embed = discord.Embed(
-                    title=f"{discord_name}({member_id})의 캐릭터 정보",
+                    title=f"{discord_name}({member_display_id})의 캐릭터 정보",
                     description=f"총 {len(member_characters)}개의 캐릭터",
                     color=discord.Color.blue()
                 )
@@ -160,12 +177,13 @@ class Lostark(commands.Cog):
                 )
                 
                 # 각 멤버별 캐릭터 수와 최고 레벨 캐릭터 정보
-                for member_id, characters in data.items():
+                for discord_id, characters in data.items():
                     if not characters:
                         continue
                     
                     # 멤버 정보 가져오기
-                    discord_name = member_info.get(member_id, {}).get('discord_name', '알 수 없음')
+                    member_display_id = member_info.get(discord_id, {}).get('id', 'Unknown')
+                    discord_name = member_info.get(discord_id, {}).get('discord_name', '알 수 없음')
                     
                     # 최고 레벨 캐릭터 찾기
                     highest_character = max(
@@ -178,7 +196,7 @@ class Lostark(commands.Cog):
                     highest_class = highest_character.get('CharacterClassName', '알 수 없음')
                     
                     embed.add_field(
-                        name=f"{discord_name}({member_id})",
+                        name=f"{discord_name}({member_display_id})",
                         value=f"캐릭터 수: {len(characters)}개\n최고 레벨: {highest_name} ({highest_class}) - {highest_level}",
                         inline=False
                     )

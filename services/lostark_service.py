@@ -154,7 +154,7 @@ class LostarkService:
             min_level: 최소 아이템 레벨
             
         Returns:
-            멤버별 캐릭터 정보
+            멤버별 캐릭터 정보 (discord_id를 키로 사용)
         """
         members = self._load_members_config()
         result = {}
@@ -165,7 +165,8 @@ class LostarkService:
             if not member.get('active', False):
                 continue
             
-            member_id = member.get('id')
+            # discord_id로 변경 (member_id 대신)
+            discord_id = member.get('discord_id')
             main_characters = member.get('main_characters', [])
             
             if not main_characters:
@@ -197,7 +198,7 @@ class LostarkService:
                     if char_name and char_name not in unique_characters:
                         unique_characters[char_name] = char
                 
-                result[member_id] = list(unique_characters.values())
+                result[discord_id] = list(unique_characters.values())
         
         return result
 
@@ -209,7 +210,7 @@ class LostarkService:
             min_level: 최소 아이템 레벨
             
         Returns:
-            멤버별 캐릭터 정보
+            멤버별 캐릭터 정보 (discord_id를 키로 사용)
         """
         members = self._load_members_config()
         result = {}
@@ -220,7 +221,8 @@ class LostarkService:
             if not member.get('active', False):
                 continue
             
-            member_id = member.get('id')
+            # discord_id로 변경 (member_id 대신)
+            discord_id = member.get('discord_id')
             main_characters = member.get('main_characters', [])
             
             if not main_characters:
@@ -245,7 +247,7 @@ class LostarkService:
                     if char_name and char_name not in unique_characters:
                         unique_characters[char_name] = char
                 
-                result[member_id] = list(unique_characters.values())
+                result[discord_id] = list(unique_characters.values())
         
         return result
 
