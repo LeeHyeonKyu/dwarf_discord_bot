@@ -1,20 +1,43 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# 환경 변수 설정 - 파이썬 출력을 버퍼링하지 않음
-ENV PYTHONUNBUFFERED=1
+# 시스템 의존성 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# 의존성 설치
+# 필요한 파일 복사
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY setup.py .
+COPY pyproject.toml .
+COPY bot.py .
+COPY clean_channel.py .
+COPY analyze_members.py .
+COPY run_sync_collector.py .
+COPY pytest.ini .
 
-# 소스 코드 복사
-COPY . .
+# 디렉토리 복사
+COPY cogs/ ./cogs/
+COPY utils/ ./utils/
+COPY services/ ./services/
+COPY configs/ ./configs/
+COPY scripts/ ./scripts/
+COPY tests/ ./tests/
 
 # 데이터 디렉토리 생성
 RUN mkdir -p data
-RUN mkdir -p /tmp/discord_bot_llm_cache
 
-# 봇 실행 - -u 옵션으로 출력 버퍼링 비활성화
-CMD ["python", "-u", "bot.py"] 
+# 패키지 설치
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -e .
+
+# 환경 변수 설정
+ENV PYTHONUNBUFFERED=1
+
+# 볼륨 설정
+VOLUME ["/app/data", "/app/configs"]
+
+# 실행
+CMD ["python", "bot.py"] 

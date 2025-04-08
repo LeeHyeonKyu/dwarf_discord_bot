@@ -1,54 +1,156 @@
-# 디스코드 봇
+# 드워프 디스코드 봇
 
-디스코드 서버에서 메시지 관리 및 사용자 멘션 기능을 제공하는 봇입니다.
+Discord 서버를 위한 다목적 봇입니다.
 
 ## 기능
 
-1. 특정 채널에 메시지 보내기
-2. 보낸 메시지에서 쓰레드 생성하기
-3. 쓰레드에 달린 댓글을 확인하고 메시지 수정하기
-4. 채널에 참여한 사용자 멘션하기
+- 기본적인 명령어 처리
+- 모듈식 구조 (Cogs)
+- 오류 처리 및 로깅
+- 로스트아크 캐릭터 정보 수집 및 조회
 
 ## 설치 방법
 
-1. 레포지토리 클론
-```bash
-git clone [레포지토리 URL]
-cd [프로젝트 폴더]
+1. 저장소 클론하기:
+   ```
+   git clone https://github.com/유저네임/dwarf_discord_bot.git
+   cd dwarf_discord_bot
+   ```
+
+2. 가상 환경 설정 (선택 사항이지만 권장):
+   ```
+   python -m venv venv
+   # Windows:
+   venv\Scripts\activate
+   # macOS/Linux:
+   source venv/bin/activate
+   ```
+
+3. 의존성 설치:
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. 환경 변수 설정:
+   `.env.secret` 파일을 편집하여 Discord 토큰을 추가하세요:
+   ```
+   DISCORD_TOKEN=귀하의_디스코드_봇_토큰
+   COMMAND_PREFIX=!
+   ```
+
+## 사용 방법
+
+봇 실행:
 ```
-
-2. 필요한 패키지 설치
-```bash
-pip install -r requirements.txt
-```
-
-3. 환경 설정
-`.env.example` 파일을 `.env.secret`로 복사하고 디스코드 봇 토큰과 채널 ID를 설정합니다.
-```bash
-cp .env.example .env.secret
-```
-
-## 봇 설정하기
-
-1. [Discord Developer Portal](https://discord.com/developers/applications)에서 새 애플리케이션을 생성합니다.
-2. "Bot" 탭으로 이동하여 봇을 추가합니다.
-3. 봇 토큰을 복사하여 `.env.secret` 파일의 `DISCORD_TOKEN`에 붙여넣습니다.
-4. "OAuth2" 탭에서 봇을 서버에 초대할 수 있는 URL을 생성합니다.
-   - 스코프: `bot`
-   - 권한: `Send Messages`, `Create Public Threads`, `Send Messages in Threads`, `Read Message History`, `Mention Everyone`
-5. 생성된 URL을 통해 봇을 서버에 초대합니다.
-6. 메시지를 보낼 채널의 ID를 복사하여 `.env.secret` 파일의 `CHANNEL_ID`에 붙여넣습니다.
-
-## 실행 방법
-
-```bash
 python bot.py
 ```
 
-## 명령어
+## 확장 모듈 개발
 
-- `!send [메시지]`: 설정된 채널에 메시지를 보냅니다.
-- `!create_thread [메시지ID] [쓰레드이름]`: 보낸 메시지에서 쓰레드를 생성합니다.
-- `!check_thread [쓰레드ID]`: 쓰레드에 달린 댓글을 확인합니다.
-- `!edit_message [메시지ID] [새로운내용]`: 봇이 보낸 메시지를 수정합니다.
-- `!mention_all`: 채널에 참여한 모든 사용자를 멘션합니다. 
+새로운 기능을 추가하려면 `cogs` 디렉토리에 새 모듈을 생성하세요:
+
+```python
+from discord.ext import commands
+
+class 새로운기능(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        
+    @commands.command()
+    async def 테스트(self, ctx):
+        await ctx.send("테스트 명령어가 작동합니다!")
+
+async def setup(bot):
+    await bot.add_cog(새로운기능(bot))
+```
+
+## 로스트아크 캐릭터 정보 수집
+
+봇은 로스트아크 API를 사용하여 멤버들의 캐릭터 정보를 수집할 수 있습니다. 이 기능을 사용하기 위해서는 다음이 필요합니다:
+
+1. `.env.secret` 파일에 로스트아크 API 키 설정:
+   ```
+   LOSTARK_API_KEY=귀하의_로스트아크_API_키
+   ```
+
+2. `configs/members_config.yaml` 파일에 멤버 정보 설정
+
+3. 캐릭터 정보 수집 명령어 사용:
+   ```
+   !캐릭터갱신
+   ```
+
+4. 수집된 캐릭터 정보 조회:
+   ```
+   !캐릭터목록 [멤버ID]
+   ```
+
+스크립트를 통한 캐릭터 정보 수집:
+```
+python scripts/collect_characters.py --min-level 1600.0
+```
+
+## Docker로 실행하기
+
+### Docker로 빌드 및 실행
+
+1. Docker 이미지 빌드:
+   ```
+   docker build -t dwarf-discord-bot .
+   ```
+
+2. Docker 컨테이너 실행:
+   ```
+   docker run -d --name dwarf-discord-bot \
+     --restart unless-stopped \
+     -v $(pwd)/data:/app/data \
+     -v $(pwd)/configs:/app/configs \
+     -v $(pwd)/bot.log:/app/bot.log \
+     --env-file .env.secret \
+     dwarf-discord-bot
+   ```
+
+### Docker Compose로 실행
+
+1. Docker Compose를 사용하여 봇 실행:
+   ```
+   docker-compose up -d
+   ```
+
+2. 로그 확인:
+   ```
+   docker-compose logs -f
+   ```
+
+3. 서비스 중지:
+   ```
+   docker-compose down
+   ```
+
+### 환경 변수 설정
+
+Docker 실행 시 `.env.secret` 파일이 자동으로 로드됩니다. 파일이 없는 경우 `.env.secret.example`을 참고하여 생성하세요.
+
+## 프로젝트 구조
+
+```
+.
+├── bot.py             # 봇 메인 파일
+├── cogs/              # 확장 모듈 디렉토리
+│   ├── lostark.py     # 로스트아크 관련 명령어
+│   └── utils.py       # 유틸리티 명령어
+├── configs/           # 설정 파일 디렉토리
+├── data/              # 데이터 파일 저장 디렉토리
+├── services/          # 서비스 모듈 디렉토리
+│   └── lostark_service.py # 로스트아크 API 서비스
+├── scripts/           # 유틸리티 스크립트 디렉토리
+└── tests/             # 테스트 코드 디렉토리
+```
+
+## 라이선스
+
+MIT
+
+## 기여
+
+이슈와 PR은 언제나 환영입니다! 

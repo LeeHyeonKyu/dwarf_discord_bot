@@ -1,21 +1,19 @@
-version: '3'
+version: '3.8'
 
 services:
   discord-bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: dwarf-discord-bot
     restart: unless-stopped
+    env_file:
+      - .env.secret
     volumes:
       - ./data:/app/data
-      - ./.env.secret:/app/.env.secret
-      - llm_cache:/tmp/discord_bot_llm_cache
-    environment:
-      - TZ=Asia/Seoul
-      - PYTHONUNBUFFERED=1
-    # 로그를 표준 출력으로 보내 Docker 로그에서 볼 수 있도록 합니다
-    tty: true
-    stdin_open: true
-
-volumes:
-  llm_cache:
-    driver: local 
+      - ./configs:/app/configs
+      - ./bot.log:/app/bot.log
+    # 컨테이너가 중지될 때 깔끔하게 종료되도록 설정
+    stop_signal: SIGINT
+    # 기본 타임아웃 보다 긴 시간 설정 (초 단위)
+    stop_grace_period: 30s 
