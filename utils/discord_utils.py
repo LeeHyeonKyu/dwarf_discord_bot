@@ -394,7 +394,7 @@ async def post_eligible_characters_to_thread(client: discord.Client, thread: Thr
         
         # 각 멤버별 캐릭터 정보 추가
         for member_id, characters in eligible_members_characters.items():
-            message += f"**{member_id}**\n"
+            message += f"**<@{member_id}>**\n"
             
             # 캐릭터 레벨 높은 순으로 정렬
             sorted_chars = sorted(
