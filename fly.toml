@@ -4,7 +4,7 @@
 #
 
 app = 'dwarf-dicsord-bot'
-primary_region = 'hkg'
+primary_region = 'nrt'
 
 [build]
 
